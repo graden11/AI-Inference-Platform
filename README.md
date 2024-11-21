@@ -11,7 +11,7 @@ boost库：https://blog.csdn.net/QIANGWEIYUAN/article/details/88792874
 muduo库：https://blog.csdn.net/QIANGWEIYUAN/article/details/89023980  
 ## 编译
 当环境都配置好之后，编译生成可执行文件：  
-```make```  
+`<make>`  
 删除编译生成的可执行文件：  
 ```make clean```  
 ## 运行
