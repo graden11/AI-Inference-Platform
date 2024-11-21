@@ -5,17 +5,25 @@
 ## 环境
 建议使用Ubuntu相关环境，需要安装一下g++、cmake、make、boost库和muduo网络库(注意：本项目的muduo库文件和boost库文件都已安装在系统目录下)。  
 基础的编译环境配置，可通过linux命令安装，在需要时自行上网搜索相应命令即可。例如：  
-```sudo apt install g++ cmake make```  
+```sh
+sudo apt install g++ cmake make
+```  
 boost库和muduo网络库的安装教程链接如下：  
 boost库：https://blog.csdn.net/QIANGWEIYUAN/article/details/88792874  
 muduo库：https://blog.csdn.net/QIANGWEIYUAN/article/details/89023980  
 ## 编译
 当环境都配置好之后，编译生成可执行文件：  
-```make```  
+```
+make
+```  
 删除编译生成的可执行文件：  
-```make clean```  
+```
+make clean
+```  
 ## 运行
-```./server 8888```  
+```
+./server 8888
+```  
 
 
 
