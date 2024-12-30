@@ -4,14 +4,14 @@
 #include <muduo/base/Logging.h>
 #include <muduo/net/EventLoop.h>
 
-#include "HttpServer.h"
+#include "WebApps/GomokuServer/include/GomokuServer.h"
 
 int main(int argc, char* argv[])
 {
   LOG_INFO << "pid = " << getpid();
   
   std::string serverName = "HttpServer";
-  int port = 8888;
+  int port = 80;
   
   // 参数解析
   int opt;
@@ -30,8 +30,9 @@ int main(int argc, char* argv[])
     }
   }
   
-  muduo::net::InetAddress listenAddr(port);
-  HttpServer server(listenAddr, serverName);
+  //WebServer server(listenAddr, serverName);
+  GomokuServer server(port, serverName);
+  server.setThreadNum(4);
   server.setThreadNum(4);
   server.start();
 }
