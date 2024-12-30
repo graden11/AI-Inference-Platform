@@ -1,4 +1,0 @@
-/home/wangyong/KamaServer/WebServer-master/build/CMakeFiles/webserver.dir
-/home/wangyong/KamaServer/WebServer-master/build/CMakeFiles/simple_server.dir
-/home/wangyong/KamaServer/WebServer-master/build/CMakeFiles/edit_cache.dir
-/home/wangyong/KamaServer/WebServer-master/build/CMakeFiles/rebuild_cache.dir
