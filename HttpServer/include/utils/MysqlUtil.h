@@ -14,7 +14,7 @@ public:
         : driver_(sql::mysql::get_mysql_driver_instance())
     {   
         // 建立连接
-        conn_ = std::unique_ptr<sql::Connection>(driver_->connect("tcp://127.0.0.1:3306", "wy", "wy2959002395"));
+        conn_ = std::unique_ptr<sql::Connection>(driver_->connect("tcp://127.0.0.1:3306", "root", "root"));
         // 选择数据库
         conn_->setSchema("Gomoku");
     }

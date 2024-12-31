@@ -72,18 +72,6 @@ bool HttpContext::parseRequest(Buffer *buf, Timestamp receiveTime)
         }
         else if (state_ == kExpectBody)
         {
-            // 从接收缓冲区获取请求体，正常来说是不应该会超过的最大的，因为你既然装的下就不可能比你跟大。
-            // request_.setBody(buf->peek(), buf->peek() + request_.contentLength());
-            // state_ = kGotAll;
-            // hasMore = false;
-
-            // // FIXME:注意这里可能会有问题
-            // if (request_.contentLength() > buf->readableBytes())
-            //     buf->retrieveAll();
-            // else if (request_.contentLength() <= buf->readableBytes())
-            //     buf->retrieve(request_.contentLength());
-            
-            // 上边确实有问题，数据包不完整，硬是说他完整，因为后续gotAll判断也是不对的
             // 检查缓冲区中是否有足够的数据，
             if (buf->readableBytes() < request_.contentLength())
             {

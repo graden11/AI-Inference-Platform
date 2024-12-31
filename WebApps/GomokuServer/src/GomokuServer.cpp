@@ -98,7 +98,6 @@ void GomokuServer::getBackendData(const HttpRequest& req, HttpResponse* resp)
               "application/json", successBody.size(), successBody, resp);
 }
 
-// 这里需要修改这里确实草率了。用户居然能够拿到resp,但是如果用户拿不到应该如何封装响应呢
 /**/
 void GomokuServer::packageResp(const std::string& version, HttpResponse::HttpStatusCode statusCode,
                      const std::string& statusMsg, bool close, const std::string& contentType,
