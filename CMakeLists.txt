@@ -1,71 +1,80 @@
 cmake_minimum_required(VERSION 3.10)
-project(WebServer VERSION 1.0)
+project(simple_server)
 
 # 设置 C++ 标准
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED True)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# 设置编译选项
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
-
-# 查找必需的包
-find_package(Threads REQUIRED)  # pthread
-
-# 设置 muduo 库路径（根据实际安装路径调整）
-set(MUDUO_PATH "/usr/local")  # muduo 安装路径
-include_directories(${MUDUO_PATH}/include)
-link_directories(${MUDUO_PATH}/lib)
-
-# 设置 MySQL Connector/C++ 路径（根据实际安装路径调整）
-set(MYSQL_CONNECTOR_PATH "/usr/local")  # MySQL Connector 安装路径
-include_directories(${MYSQL_CONNECTOR_PATH}/include)
-link_directories(${MYSQL_CONNECTOR_PATH}/lib)
-
-# 查找所有源文件
-file(GLOB_RECURSE HTTP_SERVER_SOURCES
-    "${PROJECT_SOURCE_DIR}/HttpServer/src/*.cpp"
-    "${PROJECT_SOURCE_DIR}/HttpServer/include/*.cpp"
-)
-
-file(GLOB_RECURSE GOMOKU_SOURCES
-    "${PROJECT_SOURCE_DIR}/WebApps/GomokuServer/src/*.cpp"
-    "${PROJECT_SOURCE_DIR}/WebApps/GomokuServer/include/*.cpp"
-)
-
-# 设置所有源文件
-set(ALL_SOURCES
-    ${PROJECT_SOURCE_DIR}/main.cpp
-    ${HTTP_SERVER_SOURCES}
-    ${GOMOKU_SOURCES}
-)
-
-# 包含头文件目录
+# 添加头文件路径
 include_directories(
+    ${PROJECT_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/HttpServer/include
     ${PROJECT_SOURCE_DIR}/WebApps/GomokuServer/include
+    /usr/include/mysql-cppconn-8
+    /usr/include/mysql
 )
+
+# 查找必要的库
+find_library(MYSQLCPPCONN_LIBRARY
+    NAMES mysqlcppconn mysqlcppconn8
+    PATHS /usr/lib /usr/lib64 /usr/local/lib
+)
+
+# 添加所有源文件
+file(GLOB_RECURSE HTTP_SERVER_SRC
+    "${PROJECT_SOURCE_DIR}/HttpServer/src/*.cpp"
+)
+
+file(GLOB_RECURSE GOMOKU_SERVER_SRC
+    "${PROJECT_SOURCE_DIR}/WebApps/GomokuServer/src/*.cpp"
+)
+
+# 添加主程序文件
+set(MAIN_SRC "${PROJECT_SOURCE_DIR}/WebApps/GomokuServer/src/main.cpp")
+
+# 如果主程序文件不存在，创建一个
+if(NOT EXISTS ${MAIN_SRC})
+    file(WRITE ${MAIN_SRC}
+"#include \"../include/GomokuServer.h\"
+#include <iostream>
+
+int main(int argc, char* argv[]) {
+    try {
+        GomokuServer server;
+        server.start();
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << \"Error: \" << e.what() << std::endl;
+        return 1;
+    }
+}
+")
+endif()
 
 # 添加可执行文件
-add_executable(webserver ${ALL_SOURCES})
-
-# 链接必需的库
-target_link_libraries(webserver
-    PRIVATE 
-    Threads::Threads     # pthread
-    muduo_net           # muduo 网络库
-    muduo_base          # muduo 基础库
-    mysqlcppconn       # MySQL Connector/C++
+add_executable(simple_server
+    ${MAIN_SRC}
+    ${HTTP_SERVER_SRC}
+    ${GOMOKU_SERVER_SRC}
 )
 
-# 添加示例服务器
-add_executable(simple_server 
-    ${PROJECT_SOURCE_DIR}/HttpServer/examples/simpleServer.cpp
-    ${HTTP_SERVER_SOURCES}
-)
-
+# 链接必要的库
 target_link_libraries(simple_server
-    PRIVATE 
-    Threads::Threads
+    pthread
     muduo_net
     muduo_base
+    mysqlcppconn
+    mysqlclient
 )
+
+# 打印调试信息
+message(STATUS "Include directories:")
+get_property(dirs DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES)
+foreach(dir ${dirs})
+    message(STATUS "  ${dir}")
+endforeach()
+
+message(STATUS "Main source file: ${MAIN_SRC}")
+message(STATUS "HTTP Server sources: ${HTTP_SERVER_SRC}")
+message(STATUS "Gomoku Server sources: ${GOMOKU_SERVER_SRC}")

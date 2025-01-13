@@ -28,11 +28,11 @@ void AiGameMoveHandler::handle(const HttpRequest &req, HttpResponse *resp)
         // 获取或创建游戏实例
         if (server_->aiGames_.find(userId) == server_->aiGames_.end())
         {
+            std::lock_guard<std::mutex> lock(server_->mutexForAiGames_);
             server_->aiGames_[userId] = std::make_shared<AiGame>(userId);
         }
         auto &game = server_->aiGames_[userId];
 
-        std::cout << "人类玩家移动" << x << " " << y << std::endl;
         // 处理人类玩家移动
         if (!game->humanMove(x, y))
         {
@@ -65,7 +65,10 @@ void AiGameMoveHandler::handle(const HttpRequest &req, HttpResponse *resp)
             resp->setContentLength(responseBody.size());
             resp->setBody(responseBody);
 
-            server_->aiGames_.erase(userId); // 这里删掉以后，每次restart都需要重新创建就行
+            {
+                std::lock_guard<std::mutex> lock(server_->mutexForAiGames_);
+                server_->aiGames_.erase(userId); // 这里删掉以后，每次restart都需要重新创建就行
+            }
             return;
         }
 
@@ -85,7 +88,10 @@ void AiGameMoveHandler::handle(const HttpRequest &req, HttpResponse *resp)
             resp->setContentLength(responseBody.size());
             resp->setBody(responseBody);
 
-            server_->aiGames_.erase(userId);
+            {
+                std::lock_guard<std::mutex> lock(server_->mutexForAiGames_);
+                server_->aiGames_.erase(userId); // 这里删掉以后，每次restart都需要重新创建就行
+            }
             return;
         }
 
@@ -99,7 +105,8 @@ void AiGameMoveHandler::handle(const HttpRequest &req, HttpResponse *resp)
                 {"status", "ok"},
                 {"board", game->getBoard()},
                 {"winner", "ai"},
-                {"next_turn", "none"}};
+                {"next_turn", "none"},
+                {"last_move", {{"x", game->getLastMove().first}, {"y", game->getLastMove().second}}}};
             std::string responseBody = response.dump();
 
             resp->setStatusLine(req.getVersion(), HttpResponse::k200Ok, "OK");
@@ -108,7 +115,10 @@ void AiGameMoveHandler::handle(const HttpRequest &req, HttpResponse *resp)
             resp->setContentLength(responseBody.size());
             resp->setBody(responseBody);
 
-            server_->aiGames_.erase(userId);
+            {
+                std::lock_guard<std::mutex> lock(server_->mutexForAiGames_);
+                server_->aiGames_.erase(userId); // 这里删掉以后，每次restart都需要重新创建就行
+            }
             return;
         }
 
@@ -129,7 +139,10 @@ void AiGameMoveHandler::handle(const HttpRequest &req, HttpResponse *resp)
             resp->setContentLength(responseBody.size());
             resp->setBody(responseBody);
 
-            server_->aiGames_.erase(userId);
+            {
+                std::lock_guard<std::mutex> lock(server_->mutexForAiGames_);
+                server_->aiGames_.erase(userId); // 这里删掉以后，每次restart都需要重新创建就行
+            }
             return;
         }
 

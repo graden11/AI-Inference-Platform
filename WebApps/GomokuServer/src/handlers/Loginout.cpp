@@ -5,7 +5,6 @@ void LogoutHandler::handle(const HttpRequest &req, HttpResponse *resp)
     auto contentType = req.getHeader("Content-Type");
     if (contentType.empty() || contentType != "application/json" || req.getBody().empty())
     {
-        std::cout << "资源释放位置不对，请求体：" << req.getBody() << std::endl; // fixme：这里可能有问题。
         resp->setStatusLine(req.getVersion(), HttpResponse::k400BadRequest, "Bad Request");
         resp->setCloseConnection(true);
         resp->setContentType("application/json");
@@ -28,11 +27,15 @@ void LogoutHandler::handle(const HttpRequest &req, HttpResponse *resp)
         
         json parsed = json::parse(req.getBody());
         int gameType = parsed["gameType"]; // fixme: 以后也换成从会话中获取
-        // 释放资源
-        server_->isLogining_.erase(userId);
+        
+        {   // 释放资源
+            std::lock_guard<std::mutex> lock(server_->mutexForOnlineUsers_);
+            server_->onlineUsers_.erase(userId);
+        }
 
         if (gameType == GomokuServer::MAN_VS_AI)
         {
+            std::lock_guard<std::mutex> lock(server_->mutexForAiGames_);
             server_->aiGames_.erase(userId);
         }
         else if (gameType == GomokuServer::MAN_VS_MAN)

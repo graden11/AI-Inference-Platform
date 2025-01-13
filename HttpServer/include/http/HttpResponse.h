@@ -9,6 +9,7 @@ public:
     {
         kUnknown,
         k200Ok = 200,
+        k204NoContent = 204,
         k301MovedPermanently = 301,
         k400BadRequest = 400,
         k401Unauthorized = 401,
@@ -18,7 +19,7 @@ public:
         k500InternalServerError = 500,
     };
 
-    HttpResponse(bool close)
+    HttpResponse(bool close = true)
         : statusCode_(kUnknown)
         , closeConnection_(close)
     {}
@@ -27,6 +28,9 @@ public:
     { httpVersion_ = version; }
     void setStatusCode(HttpStatusCode code)
     { statusCode_ = code; }
+
+    HttpStatusCode getStatusCode() const
+    { return statusCode_; }
 
     void setStatusMessage(const std::string message)
     { statusMessage_ = message; }

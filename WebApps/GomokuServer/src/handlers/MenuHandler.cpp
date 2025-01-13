@@ -7,7 +7,7 @@ void MenuHandler::handle(const HttpRequest &req, HttpResponse *resp)
     {
         // 检查用户是否已登录
         auto session = server_->getSessionManager()->getSession(req, resp);
-        std::cout << "session->getValue(\"isLoggedIn\") = " << session->getValue("isLoggedIn") << std::endl;
+        LOG_INFO << "session->getValue(\"isLoggedIn\") = " << session->getValue("isLoggedIn");
         if (session->getValue("isLoggedIn") != "true")
         {
             // 用户未登录，返回未授权错误
@@ -33,8 +33,6 @@ void MenuHandler::handle(const HttpRequest &req, HttpResponse *resp)
             LOG_WARN << reqFile << "not exist.";
             fileOperater.resetDefaultFile();
         }
-
-        std::cout << "输出文件成功" << std::endl;
 
         std::vector<char> buffer(fileOperater.size());
         fileOperater.readFile(buffer); // 读出文件数据

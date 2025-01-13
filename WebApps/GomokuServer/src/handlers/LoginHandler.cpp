@@ -8,7 +8,7 @@ void LoginHandler::handle(const HttpRequest &req, HttpResponse *resp)
     auto contentType = req.getHeader("Content-Type");
     if (contentType.empty() || contentType != "application/json" || req.getBody().empty())
     {
-        std::cout << "content" << req.getBody() << req.getBody();
+        LOG_INFO << "content" << req.getBody();
         resp->setStatusLine(req.getVersion(), HttpResponse::k400BadRequest, "Bad Request");
         resp->setCloseConnection(true);
         resp->setContentType("application/json");
@@ -23,7 +23,6 @@ void LoginHandler::handle(const HttpRequest &req, HttpResponse *resp)
         json parsed = json::parse(req.getBody());
         std::string username = parsed["username"];
         std::string password = parsed["password"];
-
         // 验证用户是否存在
         int userId = queryUserId(username, password);
         if (userId != -1)
@@ -38,12 +37,15 @@ void LoginHandler::handle(const HttpRequest &req, HttpResponse *resp)
             session->setValue("userId", std::to_string(userId));
             session->setValue("username", username);
             session->setValue("isLoggedIn", "true");
-            std::cout << "session->getValue(\"isLoggedIn\") = " << session->getValue("isLoggedIn") << std::endl;
-            if (server_->isLogining_.find(userId) == server_->isLogining_.end() || server_->isLogining_[userId] == false)
+            if (server_->onlineUsers_.find(userId) == server_->onlineUsers_.end() || server_->onlineUsers_[userId] == false)
             {
-                server_->isLogining_[userId] = true;
+                {
+                    std::lock_guard<std::mutex> lock(server_->mutexForOnlineUsers_);
+                    server_->onlineUsers_[userId] = true;
+                }
+                
                 // 更新历史最高在线人数
-                server_->updateMaxOnline(server_->isLogining_.size());
+                server_->updateMaxOnline(server_->onlineUsers_.size());
                 // 用户存在登录成功
                 // 封装json 数据。
                 json successResp;
@@ -110,6 +112,27 @@ void LoginHandler::handle(const HttpRequest &req, HttpResponse *resp)
 
 int LoginHandler::queryUserId(const std::string &username, const std::string &password)
 {
-    // 账号密码都拿到了，查找数据库是否有该账号密码
-    return server_->queryUserId(username, password);
+    // 前端用户传来账号密码，查找数据库是否有该账号密码
+    // 使用预处理语句, 防止sql注入
+    std::string sql = "SELECT id FROM users WHERE username = ? AND password = ?";
+    std::vector<std::string> params = {username, password};
+    std::shared_ptr<sql::ResultSet> res = mysqlUtil_.queryWithParams(sql, params);
+    if (res->next())
+    {
+        int id = res->getInt("id");
+        return id;
+    }
+    // 如果查询结果为空，则返回-1
+    return -1;
+    // std::string sql = "SELECT id FROM users WHERE username = '" + username + "' AND password = '" + password + "'";
+    // std::shared_ptr<sql::ResultSet> res = mysqlUtil_.query(sql);
+    // if (res->next())
+    // {
+    //     int id = res->getInt("id");
+    //     return id;
+    //     // return res->getInt("id");
+    // }
+    // // 如果查询结果为空，则返回-1
+    // return -1;
 }
+

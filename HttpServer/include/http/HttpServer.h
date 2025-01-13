@@ -18,9 +18,13 @@
 #include "HttpResponse.h"
 #include "../router/Router.h"
 #include "../session/SessionManager.h"
+#include "../middleware/MiddlewareChain.h"
+#include "../middleware/cors/CorsMiddleware.h"
 
 class HttpRequest;
 class HttpResponse;
+
+using namespace http; // fixme: 明天把验证完我的项目可以过夜之后，就全面替换命名空间
 
 class HttpServer : muduo::noncopyable
 {
@@ -95,6 +99,12 @@ public:
         return sessionManager_.get();
     }
 
+    // 添加中间件的方法
+    void addMiddleware(std::shared_ptr<middleware::Middleware> middleware) 
+    {
+        middlewareChain_.addMiddleware(middleware);
+    }
+
 private:
     void initialize();
 
@@ -104,7 +114,7 @@ private:
                    muduo::Timestamp receiveTime);
     void onRequest(const muduo::net::TcpConnectionPtr&, const HttpRequest&);
 
-    void onHttpCallback(const HttpRequest& req, HttpResponse* resp);
+    void handleRequest(const HttpRequest& req, HttpResponse* resp);
     
 private:
     muduo::net::InetAddress                      listenAddr_; // 监听地址
@@ -113,6 +123,7 @@ private:
     HttpCallback                                 httpCallback_; // 回调函数
     Router                                       router_; // 路由
     std::unique_ptr<SessionManager>              sessionManager_; // 会话管理器
+    middleware::MiddlewareChain                  middlewareChain_; // 中间件链
 }; 
 
 

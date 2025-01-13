@@ -22,9 +22,12 @@ void AiGameStartHandler::handle(const HttpRequest &req, HttpResponse *resp)
     int userId = std::stoi(session->getValue("userId"));
 
     // 看来需要menu页面post发送userId
-    if (server_->aiGames_.find(userId) != server_->aiGames_.end())
-        server_->aiGames_.erase(userId);
-    server_->aiGames_[userId] = std::make_shared<AiGame>(userId);
+    {
+        std::lock_guard<std::mutex> lock(server_->mutexForAiGames_);
+        if (server_->aiGames_.find(userId) != server_->aiGames_.end())
+            server_->aiGames_.erase(userId);
+        server_->aiGames_[userId] = std::make_shared<AiGame>(userId);
+    }
 
     // 创建一个ai机器人，它就while不断地执行下棋逻辑
     std::string reqFile("../WebApps/GomokuServer/resource/ChessGameVsAi.html");

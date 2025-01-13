@@ -13,7 +13,9 @@ void defaultHttpCallback(const HttpRequest &, HttpResponse *resp)
 HttpServer::HttpServer(int port,
                        const std::string &name,
                        muduo::net::TcpServer::Option option)
-    : listenAddr_(port), server_(&mainLoop_, listenAddr_, name, option), httpCallback_(std::bind(&HttpServer::onHttpCallback, this, std::placeholders::_1, std::placeholders::_2))
+    : listenAddr_(port)
+    , server_(&mainLoop_, listenAddr_, name, option)
+    , httpCallback_(std::bind(&HttpServer::handleRequest, this, std::placeholders::_1, std::placeholders::_2))
 {
     initialize();
 }
@@ -61,7 +63,6 @@ void HttpServer::onMessage(const muduo::net::TcpConnectionPtr &conn,
             conn->send("HTTP/1.1 400 Bad Request\r\n\r\n");
             conn->shutdown();
         }
-
         // 如果buf缓冲区中解析出一个完整的数据包才封装响应报文
         if (context->gotAll())
         {
@@ -84,20 +85,6 @@ void HttpServer::onRequest(const muduo::net::TcpConnectionPtr &conn, const HttpR
     bool close = ((connection == "close") ||
                   (req.getVersion() == "HTTP/1.0" && connection != "Keep-Alive"));
     HttpResponse response(close);
-    // 处理OPTIONS请求
-    if (req.method() == HttpRequest::kOptions)
-    {
-        response.setStatusLine(req.getVersion(), HttpResponse::k200Ok, "OK");
-        response.addHeader("Access-Control-Allow-Origin", "*");
-        response.addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-        response.addHeader("Access-Control-Allow-Headers", "Content-Type");
-        response.addHeader("Access-Control-Max-Age", "86400");
-
-        muduo::net::Buffer buf;
-        response.appendToBuffer(&buf);
-        conn->send(&buf);
-        return;
-    }
 
     // 根据请求报文信息来封装响应报文对象
     httpCallback_(req, &response); // 执行onHttpCallback函数
@@ -105,9 +92,10 @@ void HttpServer::onRequest(const muduo::net::TcpConnectionPtr &conn, const HttpR
     // 可以给response设置一个成员，判断是否请求的是文件，如果是文件设置为true，并且存在文件位置在这里send出去。
     muduo::net::Buffer buf;
     response.appendToBuffer(&buf);
+    // 打印完整的响应内容用于调试
+    LOG_INFO << "Sending response:\n" << buf.toStringPiece().as_string();
 
     conn->send(&buf);
-
     // 如果是短连接的话，返回响应报文后就断开连接
     if (response.closeConnection())
     {
@@ -116,14 +104,36 @@ void HttpServer::onRequest(const muduo::net::TcpConnectionPtr &conn, const HttpR
 }
 
 // 执行请求对应的路由处理函数
-void HttpServer::onHttpCallback(const HttpRequest &req, HttpResponse *resp)
+void HttpServer::handleRequest(const HttpRequest &req, HttpResponse *resp)
 {
-    if (!router_.route(req, resp))
+    try
     {
-        std::cout << "请求的啥，url：" << req.method() << " " << req.path() << std::endl;
-        std::cout << "未找到路由，返回404" << std::endl;
-        resp->setStatusCode(HttpResponse::k404NotFound);
-        resp->setStatusMessage("Not Found");
-        resp->setCloseConnection(true);
+        // 处理请求前的中间件
+        HttpRequest mutableReq = req;
+        middlewareChain_.processBefore(mutableReq);
+
+        // 路由处理
+        if (!router_.route(mutableReq, resp))
+        {
+            LOG_INFO << "请求的啥，url：" << req.method() << " " << req.path();
+            LOG_INFO << "未找到路由，返回404";
+            resp->setStatusCode(HttpResponse::k404NotFound);
+            resp->setStatusMessage("Not Found");
+            resp->setCloseConnection(true);
+        }
+
+        // 处理响应后的中间件
+        middlewareChain_.processAfter(*resp);
+    }
+    catch (const HttpResponse& res) 
+    {
+        // 处理中间件抛出的响应（如CORS预检请求）
+        *resp = res;
+    }
+    catch (const std::exception& e) 
+    {
+        // 错误处理
+        resp->setStatusCode(HttpResponse::k500InternalServerError);
+        resp->setBody(e.what());
     }
 }

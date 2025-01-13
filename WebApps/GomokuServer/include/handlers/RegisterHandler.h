@@ -11,7 +11,8 @@ public:
     void handle(const HttpRequest& req, HttpResponse* resp) override;
 private:
     int insertUser(const std::string& username, const std::string& password);
-
+    bool isUserExist(const std::string& username);
 private:
     GomokuServer* server_;
+    MysqlUtil     mysqlUtil_;
 };

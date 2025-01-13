@@ -1,6 +1,3 @@
-
-
-
 #include "../include/handlers/EntryHandler.h"
 #include "../include/handlers/LoginHandler.h"
 #include "../include/handlers/RegisterHandler.h"
@@ -11,10 +8,9 @@
 #include "../include/handlers/GameBackendHandler.h"
 
 GomokuServer::GomokuServer(int port,
-                 const std::string& name,
-                 muduo::net::TcpServer::Option option)
-    : httpServer_(port, name, option)
-    , maxOnline_(0)
+                           const std::string &name,
+                           muduo::net::TcpServer::Option option)
+    : httpServer_(port, name, option), maxOnline_(0)
 {
     initialize();
 }
@@ -31,14 +27,34 @@ void GomokuServer::start()
 
 void GomokuServer::initialize()
 {
+    // driver_->connect("tcp://127.0.0.1:3306", "wy", "wy2959002395"));
+    //         conn_->setSchema("Gomoku");
+    // 初始化数据库连接池
+    MysqlUtil::init("tcp://127.0.0.1:3306", "wy", "wy2959002395", "Gomoku", 10);
+    // 初始化会话
+    initializeSession();
+    // 初始化中间件
+    initializeMiddleware();
+    // 初始化路由
+    initializeRouter();
+}
+
+void GomokuServer::initializeSession()
+{
     // 创建会话存储
     auto sessionStorage = std::make_unique<MemorySessionStorage>();
     // 创建会话管理器
     auto sessionManager = std::make_unique<SessionManager>(std::move(sessionStorage));
     // 设置会话管理器
     setSessionManager(std::move(sessionManager));
-    // 初始化路由
-    initializeRouter();
+}
+
+void GomokuServer::initializeMiddleware()
+{
+    // 创建中间件
+    auto corsMiddleware = std::make_shared<http::middleware::CorsMiddleware>();
+    // 添加中间件
+    httpServer_.addMiddleware(corsMiddleware);
 }
 
 void GomokuServer::initializeRouter()
@@ -65,10 +81,9 @@ void GomokuServer::initializeRouter()
     httpServer_.Get("/backend", std::make_shared<GameBackendHandler>(this));
     // 后台数据获取
     httpServer_.Get("/backend_data", std::bind(&GomokuServer::getBackendData, this, std::placeholders::_1, std::placeholders::_2));
-    
 }
 
-void GomokuServer::restartChessGameVsAi(const HttpRequest& req, HttpResponse* resp)
+void GomokuServer::restartChessGameVsAi(const HttpRequest &req, HttpResponse *resp)
 {
     // 解析请求体
     auto session = getSessionManager()->getSession(req, resp);
@@ -81,81 +96,112 @@ void GomokuServer::restartChessGameVsAi(const HttpRequest& req, HttpResponse* re
         std::string errorBody = errorResp.dump(4);
 
         packageResp(req.getVersion(), HttpResponse::k401Unauthorized,
-                     "Unauthorized", true, "application/json", errorBody.size(),
-                     errorBody, resp);
+                    "Unauthorized", true, "application/json", errorBody.size(),
+                    errorBody, resp);
         return;
     }
 
     int userId = std::stoi(session->getValue("userId"));
-
-    if (aiGames_.find(userId) != aiGames_.end())
-        aiGames_.erase(userId);
-    aiGames_[userId] = std::make_shared<AiGame>(userId);
+    {
+        // 重新开始ai对战
+        std::lock_guard<std::mutex> lock(mutexForAiGames_);
+        if (aiGames_.find(userId) != aiGames_.end())
+            aiGames_.erase(userId);
+        aiGames_[userId] = std::make_shared<AiGame>(userId);
+    }
 
     json successResp;
     successResp["status"] = "ok";
     successResp["message"] = "restart successful";
     successResp["userId"] = userId;
     std::string successBody = successResp.dump(4);
-    packageResp(req.getVersion(), HttpResponse::k200Ok, "OK", false
-               , "application/json", successBody.size(), successBody, resp);
+    packageResp(req.getVersion(), HttpResponse::k200Ok, "OK", false, "application/json", successBody.size(), successBody, resp);
 }
 
 // 获取后台数据
-void GomokuServer::getBackendData(const HttpRequest& req, HttpResponse* resp)
+void GomokuServer::getBackendData(const HttpRequest &req, HttpResponse *resp)
 {
-    // 后台界面
-    // 获取当前在线人数、历史最高在线人数、数据库中已注册用户总数
-    int curOnline = getCurOnline();
-    int maxOnline = getMaxOnline();
-    int totalUser = getUserCount();
+    try {
+        // 获取数据
+        int curOnline = getCurOnline();
+        LOG_INFO << "当前在线人数: " << curOnline;
+        
+        int maxOnline = getMaxOnline();
+        LOG_INFO << "历史最高在线人数: " << maxOnline;
+        
+        int totalUser = getUserCount();
+        LOG_INFO << "已注册用户总数: " << totalUser;
 
-    json respBody;
-    respBody["curOnline"] = curOnline;
-    respBody["maxOnline"] = maxOnline;
-    respBody["totalUser"] = totalUser;
-    std::string successBody = respBody.dump(4);
-    packageResp(req.getVersion(), HttpResponse::k200Ok, "OK", false,
-              "application/json", successBody.size(), successBody, resp);
-}
+        // 构造 JSON 响应
+        nlohmann::json respBody;
+        respBody = {
+            {"curOnline", curOnline},
+            {"maxOnline", maxOnline},
+            {"totalUser", totalUser}
+        };
 
-/**/
-void GomokuServer::packageResp(const std::string& version, HttpResponse::HttpStatusCode statusCode,
-                     const std::string& statusMsg, bool close, const std::string& contentType,
-                     int contentLen, const std::string& body, HttpResponse* resp)
-{
-    resp->setVersion(version);
-    resp->setStatusCode(statusCode);    
-    resp->setStatusMessage(statusMsg);
-    resp->setCloseConnection(close);
-    resp->setContentType(contentType);
-    resp->setContentLength(contentLen);
-    resp->setBody(body);
-}
+        // 转换为字符串
+        std::string responseStr = respBody.dump(4);
+        
+        // 设置响应
+        resp->setStatusLine(req.getVersion(), HttpResponse::k200Ok, "OK");
+        resp->setContentType("application/json");
+        resp->setBody(responseStr);
+        resp->setContentLength(responseStr.size());
+        resp->setCloseConnection(false);
 
-
-int GomokuServer::queryUserId(const std::string& username, const std::string& password)
-{
-    // 账号密码都拿到了，查找数据库是否有该账号密码
-    std::shared_ptr<sql::ResultSet> res = dbOperator_.queryUser(username, password);
-    if (res->next())
-    {
-        return res->getInt("id");
+        LOG_INFO << "Backend data response prepared successfully";
     }
-    
-    return -1;
+    catch (const std::exception& e) {
+        LOG_ERROR << "Error in getBackendData: " << e.what();
+        
+        // 错误响应
+        nlohmann::json errorBody = {
+            {"error", "Internal Server Error"},
+            {"message", e.what()}
+        };
+        
+        std::string errorStr = errorBody.dump();
+        resp->setStatusCode(HttpResponse::k500InternalServerError);
+        resp->setStatusMessage("Internal Server Error");
+        resp->setContentType("application/json");
+        resp->setBody(errorStr);
+        resp->setContentLength(errorStr.size());
+        resp->setCloseConnection(true);
+    }
 }
 
-int GomokuServer::insertUser(const std::string& username, const std::string& password)
+void GomokuServer::packageResp(const std::string &version,
+                             HttpResponse::HttpStatusCode statusCode,
+                             const std::string &statusMsg,
+                             bool close,
+                             const std::string &contentType,
+                             int contentLen,
+                             const std::string &body,
+                             HttpResponse *resp)
 {
-    // 判断用户是否存在，如果存在则返回-1，否则返回用户id
-    if (!dbOperator_.isUserExist(username)) 
-    {
-        std::cout << "用户不存在, 执行插入操作" << std::endl;
-        // 用户不存在，插入用户
-        return dbOperator_.insertUser(username, password);
+    if (resp == nullptr) {
+        LOG_ERROR << "Response pointer is null";
+        return;
     }
-    
-    return -1;
+
+    try {
+        resp->setVersion(version);
+        resp->setStatusCode(statusCode);
+        resp->setStatusMessage(statusMsg);
+        resp->setCloseConnection(close);
+        resp->setContentType(contentType);
+        resp->setContentLength(contentLen);
+        resp->setBody(body);
+        
+        LOG_INFO << "Response packaged successfully";
+    }
+    catch (const std::exception& e) {
+        LOG_ERROR << "Error in packageResp: " << e.what();
+        // 设置一个基本的错误响应
+        resp->setStatusCode(HttpResponse::k500InternalServerError);
+        resp->setStatusMessage("Internal Server Error");
+        resp->setCloseConnection(true);
+    }
 }
 

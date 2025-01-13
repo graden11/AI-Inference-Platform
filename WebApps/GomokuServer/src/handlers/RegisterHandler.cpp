@@ -41,7 +41,31 @@ void RegisterHandler::handle(const HttpRequest& req, HttpResponse* resp)
     }
 }
 
-int RegisterHandler::insertUser(const std::string& username, const std::string& password)
+int RegisterHandler::insertUser(const std::string &username, const std::string &password)
 {
-    return server_->insertUser(username, password);
+    // 判断用户是否存在，如果存在则返回-1，否则返回用户id
+    if (!isUserExist(username))
+    {
+        // 用户不存在，插入用户
+        std::string sql = "INSERT INTO users (username, password) VALUES ('" + username + "', '" + password + "')";
+        mysqlUtil_.operatorDB(sql);
+        std::string sql2 = "SELECT id FROM users WHERE username = '" + username + "'";
+        std::shared_ptr<sql::ResultSet> res = mysqlUtil_.query(sql2);
+        if (res->next())
+        {
+            return res->getInt("id");
+        }
+    }
+    return -1;
+}
+
+bool RegisterHandler::isUserExist(const std::string &username)
+{
+    std::string sql = "SELECT id FROM users WHERE username = '" + username + "'";
+    std::shared_ptr<sql::ResultSet> res = mysqlUtil_.query(sql);
+    if (res->next())
+    {
+        return true;
+    }
+    return false;
 }

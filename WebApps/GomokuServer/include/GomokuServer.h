@@ -4,7 +4,7 @@
 #include <memory>
 #include <tuple>
 #include <unordered_map>
-
+#include <mutex>
 
 
 #include "AiGame.h"
@@ -41,6 +41,10 @@ public:
     void start();
 private:
     void initialize();
+    void initializeSession();
+    void initializeRouter();
+    void initializeMiddleware();
+    
     void setSessionManager(std::unique_ptr<SessionManager> manager)
     {
         httpServer_.setSessionManager(std::move(manager));
@@ -51,14 +55,8 @@ private:
         return httpServer_.getSessionManager();
     }
     
-    void initializeRouter();
-    
     void restartChessGameVsAi(const HttpRequest& req, HttpResponse* resp);
     void getBackendData(const HttpRequest& req, HttpResponse* resp);
-
-    int queryUserId(const std::string& username, const std::string& password);
-    int insertUser(const std::string& username, const std::string& password);
-
 
     void packageResp(const std::string& version, HttpResponse::HttpStatusCode statusCode,
                      const std::string& statusMsg, bool close, const std::string& contentType,
@@ -67,23 +65,37 @@ private:
     // 获取历史最高在线人数
     int getMaxOnline() const
     {
-        return maxOnline_;
+        return maxOnline_.load();
     }
 
-    // 获取当前在线人数，fixme: 从会话数量获取
+    // 获取当前在线人数
     int getCurOnline() const
     {
-        return isLogining_.size();
+        return onlineUsers_.size();
     }
 
     void updateMaxOnline(int online)
     {
-        maxOnline_ = std::max(maxOnline_, online);
+        maxOnline_ = std::max(maxOnline_.load(), online);
     }
 
+    // 获取用户总数
     int getUserCount()
     {
-        return dbOperator_.getUserCount();
+        std::string sql = "SELECT COUNT(*) as count FROM users";
+
+        std::shared_ptr<sql::ResultSet> res(mysqlUtil_.queryWithParams(sql));
+        if (res->next())
+        {
+            return res->getInt("count");
+        }
+        return 0;
+        // std::shared_ptr<sql::ResultSet> res(mysqlUtil_.query(sql));
+        // if (res->next())
+        // {
+        //     return res->getInt("count");
+        // }
+        // return 0;
     }
 
     
@@ -107,14 +119,16 @@ private:
     // 实际业务制定由GomokuServer来完成
     // 需要留意httpServer_提供哪些接口供使用
     HttpServer httpServer_;
-    MysqlUtil  dbOperator_;
+    MysqlUtil  mysqlUtil_;
     // userId -> AiBot
     std::unordered_map<int, std::shared_ptr<AiGame>> aiGames_;
+    std::mutex mutexForAiGames_;
     // userId -> 是否在游戏中
-    std::unordered_map<int, bool> isLogining_;
-
+    std::unordered_map<int, bool> onlineUsers_;
+    std::mutex mutexForOnlineUsers_;
+     
     // 最高在线人数
-    int maxOnline_;
+    std::atomic<int> maxOnline_;
 };
 
 // muduo库中的无锁机制保证线程安全，是在每次执行要操作共享资源的使用，

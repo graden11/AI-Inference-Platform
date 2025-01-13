@@ -26,6 +26,14 @@
             color: #333;
             text-align: center;
         }
+        /* 添加加载动画样式 */
+        .loading {
+            color: #666;
+            font-style: italic;
+        }
+        .error {
+            color: #ff0000;
+        }
     </style>
 </head>
 <body>
@@ -33,30 +41,53 @@
         <h1>卡码五子棋游戏后台统计</h1>
         <div class="stat-item">
             <strong>当前在线人数：</strong>
-            <span id="curOnline">loading...</span>
+            <span id="curOnline" class="loading">loading...</span>
         </div>
         <div class="stat-item">
             <strong>历史最高在线：</strong>
-            <span id="maxOnline">loading...</span>
+            <span id="maxOnline" class="loading">loading...</span>
         </div>
         <div class="stat-item">
             <strong>注册用户总数：</strong>
-            <span id="totalUser">loading...</span>
+            <span id="totalUser" class="loading">loading...</span>
         </div>
     </div>
 
     <script>
-        // 页面加载完成后获取数据
-        window.onload = function() {
-            fetch('/backend_data')
-                .then(response => response.json())
-                .then(data => {
-                    document.getElementById('curOnline').textContent = data.curOnline;
-                    document.getElementById('maxOnline').textContent = data.maxOnline;
-                    document.getElementById('totalUser').textContent = data.totalUser;
-                })
-                .catch(error => console.error('Error:', error));
-        };
+        function updateStats() {
+            console.log('Fetching backend data...');
+            
+            fetch('/backend_data', {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json'
+                },
+                credentials: 'same-origin'  // 添加凭证支持
+            })
+            .then(response => {
+                console.log('Response status:', response.status);
+                if (!response.ok) {
+                    throw new Error('Network response was not ok: ' + response.status);
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('Received data:', data);
+                document.getElementById('curOnline').textContent = data.curOnline;
+                document.getElementById('maxOnline').textContent = data.maxOnline;
+                document.getElementById('totalUser').textContent = data.totalUser;
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                ['curOnline', 'maxOnline', 'totalUser'].forEach(id => {
+                    document.getElementById(id).textContent = 'Error loading data';
+                });
+            });
+        }
+
+        window.addEventListener('load', updateStats);
+        setInterval(updateStats, 30000);
     </script>
 </body>
 </html>
