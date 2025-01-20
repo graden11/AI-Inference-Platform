@@ -132,15 +132,15 @@ sudo ./simple_server
 > 程序运行起来后，到浏览器访问自己对应的 ip:端口号  
 
 登录界面  
-![登录界面](images/image1.png)
+![登录界面](images/image1.jpg)
 菜单界面  
 > 匹配玩家和退出游戏待开发中。。。 </br>
 
-![菜单界面](images/image2.png)
+![菜单界面](images/image2.jpg)
 对战AI  
 > 人机对战目前只是用于demo测试，AI很弱智，待完善。。。  
 
-![菜单界面](images/image3.png) 
+![菜单界面](images/image3.jpg) 
 
 ## 总结
 - HttpServer是一个基于C++的高性能HTTP服务器框架，旨在简化Web应用的开发与部署。
