@@ -1,3 +1,0 @@
-/home/nowcoder/muduo-webserver/webserver-muduo/WebServer-master/HttpServer/build/CMakeFiles/rebuild_cache.dir
-/home/nowcoder/muduo-webserver/webserver-muduo/WebServer-master/HttpServer/build/CMakeFiles/HttpServer.dir
-/home/nowcoder/muduo-webserver/webserver-muduo/WebServer-master/HttpServer/build/CMakeFiles/edit_cache.dir
