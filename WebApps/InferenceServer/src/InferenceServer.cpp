@@ -13,8 +13,10 @@
 #include "../include/ResNet50TRTEngine.h"
 #endif
 #include "../../../HttpServer/include/middleware/MetricsMiddleware.h"
-#include "../../../HttpServer/include/session/MemorySessionStorage.h"
+#include "../../../HttpServer/include/session/SessionStorage.h"
+#ifdef ENABLE_REDIS
 #include "../../../HttpServer/include/session/RedisSessionStorage.h"
+#endif
 #include <fstream>
 #include "../../../HttpServer/include/http/HttpRequest.h"
 #include "../../../HttpServer/include/http/HttpResponse.h"
@@ -84,12 +86,16 @@ void InferenceServer::initialize()
 void InferenceServer::initializeSession()
 {
     std::unique_ptr<http::session::SessionStorage> storage;
+#ifdef ENABLE_REDIS
     if (config_.redis.host.empty()) {
         storage = std::make_unique<http::session::MemorySessionStorage>();
     } else {
         storage = std::make_unique<http::session::RedisSessionStorage>(
             config_.redis.host, config_.redis.port);
     }
+#else
+    storage = std::make_unique<http::session::MemorySessionStorage>();
+#endif
     auto sessionManager = std::make_unique<http::session::SessionManager>(std::move(storage));
     setSessionManager(std::move(sessionManager));
 }

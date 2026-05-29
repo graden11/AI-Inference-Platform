@@ -43,6 +43,13 @@ find_library(HIREDIS_LIBRARY
     PATHS /usr/lib /usr/lib64 /usr/local/lib
 )
 
+if(HIREDIS_LIBRARY)
+    add_definitions(-DENABLE_REDIS)
+    message(STATUS "Redis support: ENABLED (hiredis found)")
+else()
+    message(STATUS "Redis support: DISABLED (hiredis not found, using in-memory only)")
+endif()
+
 # --- Protobuf 代码生成 ---
 set(PROTO_DIR "${PROJECT_SOURCE_DIR}/proto")
 set(GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
@@ -71,6 +78,10 @@ file(GLOB_RECURSE INFERENCE_SERVER_SRC
 
 if(NOT ENABLE_TENSORRT)
     list(FILTER INFERENCE_SERVER_SRC EXCLUDE REGEX "ResNet50TRTEngine\\.cpp")
+endif()
+
+if(NOT HIREDIS_LIBRARY)
+    list(FILTER HTTP_SERVER_SRC EXCLUDE REGEX "RedisSessionStorage\\.cpp")
 endif()
 
 # 添加主程序文件
@@ -113,11 +124,14 @@ target_link_libraries(simple_server
     ssl
     crypto
     crypt
-    ${HIREDIS_LIBRARY}
     protobuf
     ${PROJECT_SOURCE_DIR}/third_party/onnxruntime/lib/libonnxruntime.so
     /usr/lib/x86_64-linux-gnu/libfmt.so
 )
+
+if(HIREDIS_LIBRARY)
+    target_link_libraries(simple_server ${HIREDIS_LIBRARY})
+endif()
 
 if(ENABLE_TENSORRT)
     target_link_libraries(simple_server
