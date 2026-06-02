@@ -249,17 +249,18 @@ bool ResNet50TRTEngine::buildEngine(const std::string &onnxPath, const std::stri
         LOG_INFO << "TRT builder: FP16 enabled";
     }
 
-    // Dynamic batch: allow engine to handle batch sizes from 1 to maxBatchSize
+    // Dynamic batch: allow engine to handle batch sizes up to at least 8
+    int maxBatch = std::max(8, maxBatchSize);
     auto profile = builder->createOptimizationProfile();
     profile->setDimensions(INPUT_NAME, nvinfer1::OptProfileSelector::kMIN,
                            nvinfer1::Dims4{1, INPUT_C, INPUT_H, INPUT_W});
     profile->setDimensions(INPUT_NAME, nvinfer1::OptProfileSelector::kOPT,
-                           nvinfer1::Dims4{std::max(1, maxBatchSize / 2), INPUT_C, INPUT_H, INPUT_W});
+                           nvinfer1::Dims4{maxBatch / 2, INPUT_C, INPUT_H, INPUT_W});
     profile->setDimensions(INPUT_NAME, nvinfer1::OptProfileSelector::kMAX,
-                           nvinfer1::Dims4{maxBatchSize, INPUT_C, INPUT_H, INPUT_W});
+                           nvinfer1::Dims4{maxBatch, INPUT_C, INPUT_H, INPUT_W});
     config->addOptimizationProfile(profile);
     LOG_INFO << "TRT builder: dynamic batch profile [" << 1 << ", "
-             << std::max(1, maxBatchSize / 2) << ", " << maxBatchSize << "]";
+             << maxBatch / 2 << ", " << maxBatch << "]";
 
     auto plan = std::unique_ptr<nvinfer1::IHostMemory>(builder->buildSerializedNetwork(*network, *config));
     if (!plan)
