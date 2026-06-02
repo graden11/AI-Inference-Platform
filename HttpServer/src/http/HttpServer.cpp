@@ -1,8 +1,10 @@
 #include "../../include/http/HttpServer.h"
+#include "../../include/utils/LogUtil.h"
 
 #include <any>
 #include <functional>
 #include <memory>
+#include <thread>
 
 namespace http
 {
@@ -35,6 +37,35 @@ void HttpServer::start()
     mainLoop_.loop();
 }
 
+void HttpServer::stop()
+{
+    mainLoop_.quit();
+}
+
+void HttpServer::gracefulShutdown(std::chrono::milliseconds timeout)
+{
+    shuttingDown_.store(true);
+    accepting_.store(false);
+
+    int remaining = inflightCount_.load();
+    LOG_INFO << "Graceful shutdown: stopped accepting, draining " << remaining << " in-flight requests";
+
+    auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (remaining > 0)
+    {
+        if (std::chrono::steady_clock::now() >= deadline)
+        {
+            LOG_WARN << "Shutdown timeout reached, " << remaining << " requests still in-flight";
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        remaining = inflightCount_.load();
+    }
+
+    LOG_INFO << "Draining complete, stopping server";
+    stop();
+}
+
 void HttpServer::initialize()
 {
     // 设置回调函数
@@ -64,20 +95,29 @@ void HttpServer::onConnection(const muduo::net::TcpConnectionPtr& conn)
 {
     if (conn->connected())
     {
+        if (!accepting_.load())
+        {
+            conn->shutdown();
+            return;
+        }
         if (useSSL_)
         {
             auto sslConn = std::make_unique<ssl::SslConnection>(conn, sslCtx_.get());
             sslConn->setMessageCallback(
                 std::bind(&HttpServer::onMessage, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
-            sslConns_[conn] = std::move(sslConn);
-            sslConns_[conn]->startHandshake();
+            {
+                std::lock_guard<std::mutex> lock(sslConnsMutex_);
+                sslConns_[conn] = std::move(sslConn);
+                sslConns_[conn]->startHandshake();
+            }
         }
         conn->setContext(HttpContext());
     }
-    else 
+    else
     {
         if (useSSL_)
         {
+            std::lock_guard<std::mutex> lock(sslConnsMutex_);
             sslConns_.erase(conn);
         }
     }
@@ -93,28 +133,24 @@ void HttpServer::onMessage(const muduo::net::TcpConnectionPtr &conn,
         if (useSSL_)
         {
             LOG_INFO << "onMessage useSSL_ is true";
-            // 1.查找对应的SSL连接
+            std::lock_guard<std::mutex> lock(sslConnsMutex_);
             auto it = sslConns_.find(conn);
             if (it != sslConns_.end())
             {
                 LOG_INFO << "onMessage sslConns_ is not empty";
-                // 2. SSL连接处理数据
                 it->second->onRead(conn, buf, receiveTime);
 
-                // 3. 如果 SSL 握手还未完成，直接返回
                 if (!it->second->isHandshakeCompleted())
                 {
                     LOG_INFO << "onMessage sslConns_ is not empty";
                     return;
                 }
 
-                // 4. 从SSL连接的解密缓冲区获取数据
                 muduo::net::Buffer* decryptedBuf = it->second->getDecryptedBuffer();
                 if (decryptedBuf->readableBytes() == 0)
-                    return; // 没有解密后的数据
+                    return;
 
-                // 5. 使用解密后的数据进行HTTP 处理
-                buf = decryptedBuf; // 将 buf 指向解密后的数据
+                buf = decryptedBuf;
                 LOG_INFO << "onMessage decryptedBuf is not empty";
             }
         }
@@ -144,10 +180,15 @@ void HttpServer::onMessage(const muduo::net::TcpConnectionPtr &conn,
 
 void HttpServer::onRequest(const muduo::net::TcpConnectionPtr &conn, const HttpRequest &req)
 {
+    inflightCount_.fetch_add(1);
+
     const std::string &connection = req.getHeader("Connection");
     bool close = ((connection == "close") ||
                   (req.getVersion() == "HTTP/1.0" && connection != "Keep-Alive"));
+    if (shuttingDown_.load()) close = true;
     HttpResponse response(close);
+    response.setRequestId(generateRequestId());
+    response.setClientIp(conn->peerAddress().toIp());
 
     // 根据请求报文信息来封装响应报文对象
     httpCallback_(req, &response); // 执行onHttpCallback函数
@@ -164,6 +205,8 @@ void HttpServer::onRequest(const muduo::net::TcpConnectionPtr &conn, const HttpR
     {
         conn->shutdown();
     }
+
+    inflightCount_.fetch_sub(1);
 }
 
 // 执行请求对应的路由处理函数

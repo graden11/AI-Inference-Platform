@@ -20,6 +20,17 @@ public:
     virtual std::string predict(const std::string &imagePath) = 0;
     virtual std::string predictFromBytes(const std::vector<uint8_t> &imageData) = 0;
 
+    virtual int maxBatchSize() const { return 1; }
+
+    virtual std::vector<std::string> predictBatch(const std::vector<std::vector<uint8_t>> &images)
+    {
+        std::vector<std::string> results;
+        results.reserve(images.size());
+        for (auto &img : images)
+            results.push_back(predictFromBytes(img));
+        return results;
+    }
+
     static constexpr const char *INPUT_NAME = "input";
     static constexpr const char *OUTPUT_NAME = "output";
     static constexpr int INPUT_W = 224;

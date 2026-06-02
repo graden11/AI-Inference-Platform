@@ -136,6 +136,7 @@ endif()
 if(ENABLE_TENSORRT)
     target_link_libraries(simple_server
         /usr/lib/x86_64-linux-gnu/libnvinfer.so
+        /usr/lib/x86_64-linux-gnu/libnvonnxparser.so
         /usr/local/cuda/lib64/libcudart.so
     )
 endif()

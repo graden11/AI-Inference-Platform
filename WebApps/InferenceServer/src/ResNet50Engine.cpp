@@ -15,15 +15,18 @@
 
 #include "../../../HttpServer/include/utils/JsonUtil.h"
 
-ResNet50Engine::ResNet50Engine(const std::string &modelPath, const std::string &labelsPath)
+ResNet50Engine::ResNet50Engine(const std::string &modelPath, const std::string &labelsPath,
+                               int maxBatchSize)
     : env_(ORT_LOGGING_LEVEL_WARNING, "resnet"),
-      memInfo_("Cpu", OrtArenaAllocator, 0, OrtMemTypeDefault)
+      memInfo_("Cpu", OrtArenaAllocator, 0, OrtMemTypeDefault),
+      maxBatchSize_(maxBatchSize)
 {
     sessionOpts_.SetIntraOpNumThreads(1);
     session_ = std::make_unique<Ort::Session>(env_, modelPath.c_str(), sessionOpts_);
     labels_ = loadLabels(labelsPath);
     LOG_INFO << "ResNet50Engine initialized, model: " << modelPath
-             << ", labels: " << labels_.size();
+             << ", labels: " << labels_.size()
+             << ", maxBatchSize: " << maxBatchSize_;
 }
 
 ResNet50Engine::~ResNet50Engine() = default;
@@ -75,6 +78,7 @@ std::vector<std::pair<int, float>> ResNet50Engine::runInference(const std::vecto
     const char *inputNames[] = {INPUT_NAME};
     const char *outputNames[] = {OUTPUT_NAME};
 
+    std::lock_guard<std::mutex> lock(inferenceMutex_);
     auto outputValues = session_->Run(Ort::RunOptions{},
                                       inputNames, &inputValue, 1,
                                       outputNames, 1);
@@ -126,4 +130,61 @@ std::string ResNet50Engine::predictFromBytes(const std::vector<uint8_t> &imageDa
 
     auto results = runInference(input);
     return buildPredictionsJson(results, labels_).dump();
+}
+
+std::vector<std::string> ResNet50Engine::predictBatch(
+    const std::vector<std::vector<uint8_t>> &images)
+{
+    int batchSize = static_cast<int>(images.size());
+    if (batchSize == 0)
+        return {};
+
+    // Decode and preprocess all images, concatenate into one NCHW tensor
+    const int elemPerImage = INPUT_C * INPUT_H * INPUT_W;
+    std::vector<float> batchInput;
+    batchInput.reserve(batchSize * elemPerImage);
+
+    for (auto &img : images)
+    {
+        int w, h, channels;
+        unsigned char *data = stbi_load_from_memory(
+            img.data(), static_cast<int>(img.size()), &w, &h, &channels, 3);
+        if (!data)
+        {
+            LOG_ERROR << "predictBatch: failed to decode image, skipping";
+            batchInput.insert(batchInput.end(), elemPerImage, 0.0f);
+            continue;
+        }
+        auto input = preprocess(data, w, h, 3);
+        stbi_image_free(data);
+        batchInput.insert(batchInput.end(), input.begin(), input.end());
+    }
+
+    // Single inference with batch shape
+    std::vector<int64_t> shape = {batchSize, INPUT_C, INPUT_H, INPUT_W};
+
+    Ort::Value inputValue = Ort::Value::CreateTensor<float>(
+        memInfo_, batchInput.data(), batchInput.size(), shape.data(), shape.size());
+
+    const char *inputNames[] = {INPUT_NAME};
+    const char *outputNames[] = {OUTPUT_NAME};
+
+    std::lock_guard<std::mutex> lock(inferenceMutex_);
+    auto outputValues = session_->Run(Ort::RunOptions{},
+                                      inputNames, &inputValue, 1,
+                                      outputNames, 1);
+
+    float *logits = outputValues[0].GetTensorMutableData<float>();
+    auto typeInfo = outputValues[0].GetTensorTypeAndShapeInfo();
+    size_t totalElements = typeInfo.GetElementCount();
+    size_t numClasses = totalElements / batchSize;
+
+    std::vector<std::string> results;
+    results.reserve(batchSize);
+    for (int i = 0; i < batchSize; ++i)
+    {
+        auto topk = softmaxTopK(logits + i * numClasses, numClasses);
+        results.push_back(buildPredictionsJson(topk, labels_).dump());
+    }
+    return results;
 }

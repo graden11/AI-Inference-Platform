@@ -15,18 +15,27 @@ struct ServerConfig {
     std::string name = "HttpServer";
     int threads = 4;
     std::string log_level = "WARN";
+    int shutdown_timeout_ms = 30000;
 };
 
 struct MysqlConfig {
     std::string host = "tcp://mysql:3306";
-    std::string user = "root";
-    std::string password = "root";
+    std::string user = "";
+    std::string password = "";
     std::string database = "inference_platform";
     int pool_size = 10;
 };
 
 struct ModelEntryConfig {
-    std::string type;   // "onnx" or "tensorrt"
+    std::string type;    // "onnx" or "tensorrt"
+    std::string version; // 为空时默认 "1"
+    std::string path;
+};
+
+struct DynamicModelEntry {
+    std::string name;
+    std::string version;
+    std::string type;
     std::string path;
 };
 
@@ -36,18 +45,27 @@ struct RedisConfig {
     int pool_size = 5;
 };
 
+struct BatchingConfig {
+    bool enabled = false;
+    int max_batch_size = 8;
+    int max_delay_ms = 10;
+};
+
 struct LoggingConfig {
     std::string level = "INFO";
     std::string file  = "server.log";
+    std::string access_log = "access.log";
 };
 
 struct AppConfig {
     ServerConfig server;
     MysqlConfig mysql;
     RedisConfig redis;
+    BatchingConfig batching;
     LoggingConfig logging;
     std::string labels_path;
     std::unordered_map<std::string, ModelEntryConfig> models;
+    std::vector<DynamicModelEntry> dynamic_engines;
 };
 
 inline AppConfig loadConfig(const std::string &filePath)
@@ -78,14 +96,16 @@ inline AppConfig loadConfig(const std::string &filePath)
         if (s.contains("name"))     cfg.server.name = s["name"].get<std::string>();
         if (s.contains("threads"))  cfg.server.threads = s["threads"].get<int>();
         if (s.contains("log_level")) cfg.server.log_level = s["log_level"].get<std::string>();
+        if (s.contains("shutdown_timeout_ms")) cfg.server.shutdown_timeout_ms = s["shutdown_timeout_ms"].get<int>();
     }
 
     // Logging
     if (j.contains("logging"))
     {
         auto &l = j["logging"];
-        if (l.contains("level")) cfg.logging.level = l["level"].get<std::string>();
-        if (l.contains("file"))  cfg.logging.file  = l["file"].get<std::string>();
+        if (l.contains("level"))      cfg.logging.level = l["level"].get<std::string>();
+        if (l.contains("file"))       cfg.logging.file  = l["file"].get<std::string>();
+        if (l.contains("access_log")) cfg.logging.access_log = l["access_log"].get<std::string>();
     }
 
     // MySQL
@@ -121,9 +141,34 @@ inline AppConfig loadConfig(const std::string &filePath)
             {
                 ModelEntryConfig mec;
                 mec.type = entry.value("type", "onnx");
+                mec.version = entry.value("version", "");
                 mec.path = entry.value("path", "");
                 cfg.models[name] = mec;
             }
+        }
+    }
+
+    // Batching
+    if (j.contains("batching"))
+    {
+        auto &b = j["batching"];
+        if (b.contains("enabled"))         cfg.batching.enabled = b["enabled"].get<bool>();
+        if (b.contains("max_batch_size"))  cfg.batching.max_batch_size = b["max_batch_size"].get<int>();
+        if (b.contains("max_delay_ms"))    cfg.batching.max_delay_ms = b["max_delay_ms"].get<int>();
+    }
+
+    // Dynamic engines (persisted by /models/load API)
+    if (j.contains("dynamic_engines"))
+    {
+        for (auto &entry : j["dynamic_engines"])
+        {
+            DynamicModelEntry dme;
+            dme.name = entry.value("name", "");
+            dme.version = entry.value("version", "");
+            dme.type = entry.value("type", "");
+            dme.path = entry.value("path", "");
+            if (!dme.name.empty() && !dme.path.empty())
+                cfg.dynamic_engines.push_back(dme);
         }
     }
 

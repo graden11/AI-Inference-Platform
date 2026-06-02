@@ -17,11 +17,12 @@
   --color-text-dim: #8888a0;
   --color-error: #ff4d6a;
   --color-success: #2ecc71;
+  --color-warn: #f0a040;
   --color-input-bg: rgba(255,255,255,0.06);
   --radius: 12px;
   --radius-sm: 8px;
   --font-mono: "SF Mono", "Fira Code", "Cascadia Code", monospace;
-  --max-width: 1000px;
+  --max-width: 1024px;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -56,10 +57,8 @@ body::before {
   z-index: 100;
   background: rgba(10,10,20,0.85);
   backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--color-border);
 }
-
 .header-inner {
   max-width: var(--max-width);
   margin: 0 auto;
@@ -69,7 +68,6 @@ body::before {
   align-items: center;
   justify-content: space-between;
 }
-
 .logo {
   display: flex;
   align-items: center;
@@ -79,7 +77,6 @@ body::before {
   color: var(--color-text);
   text-decoration: none;
 }
-
 .logo-icon {
   width: 32px; height: 32px;
   background: linear-gradient(135deg, var(--color-primary), var(--color-accent));
@@ -89,13 +86,7 @@ body::before {
   justify-content: center;
   font-size: 1rem;
 }
-
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
+.header-right { display: flex; align-items: center; gap: 16px; }
 .user-tag {
   font-size: 0.85rem;
   color: var(--color-text-dim);
@@ -104,9 +95,7 @@ body::before {
   border: 1px solid var(--color-border);
   border-radius: 20px;
 }
-
 .user-tag strong { color: var(--color-primary); font-weight: 600; }
-
 .btn-logout {
   padding: 5px 14px;
   font-size: 0.8rem;
@@ -118,86 +107,64 @@ body::before {
   transition: all 0.2s;
   font-family: inherit;
 }
-
-.btn-logout:hover {
-  color: var(--color-error);
-  border-color: rgba(255,77,106,0.4);
-}
+.btn-logout:hover { color: var(--color-error); border-color: rgba(255,77,106,0.4); }
 
 /* Main */
-.main {
-  position: relative;
-  z-index: 1;
-  max-width: var(--max-width);
-  margin: 0 auto;
-  padding: 32px 24px;
-}
+.main { position: relative; z-index: 1; max-width: var(--max-width); margin: 0 auto; padding: 24px; }
 
-/* Stats */
-.stats-row {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
-  margin-bottom: 32px;
-}
-
-.stat-card {
+/* Section */
+.section {
   background: var(--color-card);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
-  padding: 20px;
-  text-align: center;
+  padding: 24px;
+  margin-bottom: 20px;
 }
-
-.stat-value {
-  font-size: 1.6rem;
-  font-weight: 700;
-  font-family: var(--font-mono);
-  color: var(--color-primary);
-}
-
-.stat-label {
-  font-size: 0.8rem;
-  color: var(--color-text-dim);
-  margin-top: 4px;
-}
-
-/* Section titles */
 .section-title {
-  font-size: 1.2rem;
+  font-size: 1.05rem;
   margin-bottom: 16px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
-
 .section-title::before {
   content: "";
   display: block;
-  width: 4px; height: 18px;
+  width: 4px; height: 16px;
   background: var(--color-primary);
   border-radius: 2px;
 }
 
-/* Predict panel */
-.predict-section {
+/* Stats row */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.stat-card {
   background: var(--color-card);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
-  padding: 28px;
-  margin-bottom: 32px;
+  padding: 16px;
+  text-align: center;
 }
-
-.upload-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
+.stat-value {
+  font-size: 1.4rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--color-primary);
 }
+.stat-label { font-size: 0.75rem; color: var(--color-text-dim); margin-top: 4px; }
+.stat-ok { color: var(--color-success) !important; }
+.stat-warn { color: var(--color-warn) !important; }
+.stat-err { color: var(--color-error) !important; }
 
+/* Predict */
+.upload-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .file-label {
   display: inline-block;
-  padding: 10px 24px;
+  padding: 8px 20px;
   background: var(--color-input-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
@@ -207,99 +174,137 @@ body::before {
   transition: border-color 0.2s;
 }
 .file-label:hover { border-color: var(--color-primary); }
-
 #file-input { display: none; }
-
 #file-name {
   font-size: 0.85rem;
   color: var(--color-text-dim);
-  max-width: 280px;
+  max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
+.model-select {
+  padding: 8px 12px;
+  background: var(--color-input-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: 0.85rem;
+  font-family: inherit;
+  cursor: pointer;
+}
 .btn {
-  padding: 10px 28px;
+  padding: 8px 20px;
   border: none;
   border-radius: var(--radius-sm);
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
   font-family: inherit;
 }
-
 .btn-primary {
   background: linear-gradient(135deg, var(--color-primary), var(--color-accent));
   color: #fff;
 }
 .btn-primary:hover { opacity: 0.92; }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-
-#loading-hint {
-  display: none;
-  margin-top: 14px;
-  color: var(--color-primary);
-  font-size: 0.9rem;
+.btn-sm {
+  padding: 4px 12px;
+  font-size: 0.78rem;
+  font-weight: 500;
 }
-
-.results {
-  display: none;
-  margin-top: 20px;
+.btn-danger {
+  background: transparent;
+  color: var(--color-error);
+  border: 1px solid rgba(255,77,106,0.3);
 }
+.btn-danger:hover { background: rgba(255,77,106,0.1); }
 
-.results h3 {
-  font-size: 0.95rem;
-  color: var(--color-text-dim);
-  margin-bottom: 10px;
-}
+#loading-hint { display: none; margin-top: 12px; color: var(--color-primary); font-size: 0.85rem; }
 
+/* Results */
+.results { display: none; margin-top: 16px; }
+.results h3 { font-size: 0.9rem; color: var(--color-text-dim); margin-bottom: 8px; }
 .result-item {
   display: flex;
   justify-content: space-between;
-  padding: 8px 14px;
-  margin: 4px 0;
+  padding: 6px 12px;
+  margin: 3px 0;
   background: var(--color-input-bg);
   border-radius: var(--radius-sm);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
 }
+.result-item .score { color: var(--color-primary); font-family: var(--font-mono); font-weight: 600; }
 
-.result-item .score {
-  color: var(--color-primary);
-  font-family: var(--font-mono);
-  font-weight: 600;
-}
-
-/* API reference */
-.api-section {
-  margin-bottom: 32px;
-}
-
-.api-table {
+/* Model table */
+.model-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
 }
-
-.api-table th, .api-table td {
-  padding: 10px 14px;
+.model-table th, .model-table td {
+  padding: 8px 12px;
   text-align: left;
   border-bottom: 1px solid var(--color-border);
 }
-
-.api-table th {
+.model-table th {
   color: var(--color-text-dim);
   font-weight: 500;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   text-transform: uppercase;
 }
-
-.api-table td:first-child {
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
   font-family: var(--font-mono);
-  color: var(--color-success);
 }
+.badge-onnx { background: rgba(46,204,113,0.15); color: var(--color-success); }
+.badge-trt  { background: var(--color-primary-dim); color: var(--color-primary); }
+.badge-latest { background: rgba(240,160,64,0.15); color: var(--color-warn); }
 
+/* Health checks */
+.checks-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.check-card {
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  text-align: center;
+}
+.check-card h4 { font-size: 0.8rem; color: var(--color-text-dim); margin-bottom: 6px; }
+.check-card .status { font-size: 0.85rem; font-weight: 600; }
+.check-pass { border-color: rgba(46,204,113,0.3); }
+.check-pass .status { color: var(--color-success); }
+.check-fail { border-color: rgba(255,77,106,0.3); }
+.check-fail .status { color: var(--color-error); }
+.check-pending .status { color: var(--color-warn); }
+
+/* Load form */
+.load-form { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field label { font-size: 0.7rem; color: var(--color-text-dim); text-transform: uppercase; }
+.field input, .field select {
+  padding: 6px 10px;
+  background: var(--color-input-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text);
+  font-size: 0.85rem;
+  font-family: inherit;
+}
+.field input:focus { border-color: var(--color-primary); outline: none; }
+.msg { display: none; margin-top: 10px; font-size: 0.85rem; padding: 6px 12px; border-radius: 4px; }
+.msg-ok { background: rgba(46,204,113,0.1); color: var(--color-success); }
+.msg-err { background: rgba(255,77,106,0.1); color: var(--color-error); }
+
+/* API table */
+.api-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.api-table th, .api-table td { padding: 7px 10px; text-align: left; border-bottom: 1px solid var(--color-border); }
+.api-table th { color: var(--color-text-dim); font-weight: 500; font-size: 0.75rem; text-transform: uppercase; }
+.api-table td:first-child { font-family: var(--font-mono); color: var(--color-success); }
 .method-badge {
   display: inline-block;
   padding: 2px 8px;
@@ -308,14 +313,14 @@ body::before {
   font-weight: 700;
   font-family: var(--font-mono);
 }
-
 .method-badge.get  { background: rgba(46,204,113,0.15); color: var(--color-success); }
 .method-badge.post { background: var(--color-primary-dim); color: var(--color-primary); }
+.method-badge.del  { background: rgba(255,77,106,0.15); color: var(--color-error); }
 
 /* Footer */
 .footer {
   border-top: 1px solid var(--color-border);
-  padding: 20px 24px;
+  padding: 18px 24px;
   text-align: center;
   font-size: 0.8rem;
   color: var(--color-text-dim);
@@ -323,27 +328,34 @@ body::before {
   z-index: 1;
 }
 
-/* Responsive */
 @media (max-width: 768px) {
-  .stats-row { grid-template-columns: repeat(3, 1fr); gap: 10px; }
-  .stat-card { padding: 14px 10px; }
-  .stat-value { font-size: 1.3rem; }
-  .upload-row { flex-direction: column; align-items: stretch; }
-  .predict-section { padding: 20px; }
+  .stats-row { grid-template-columns: repeat(2, 1fr); }
+  .checks-grid { grid-template-columns: repeat(3, 1fr); }
+  .load-form { flex-direction: column; }
+  .model-table { font-size: 0.78rem; }
 }
-
 @media (max-width: 480px) {
-  .header-inner { padding: 0 16px; }
-  .main { padding: 20px 16px; }
-  .stats-row { grid-template-columns: 1fr; }
-  .api-table { font-size: 0.8rem; }
-  .api-table th, .api-table td { padding: 8px 6px; }
+  .header-inner { padding: 0 12px; }
+  .main { padding: 16px 12px; }
+  .stats-row { grid-template-columns: 1fr 1fr; }
+  .checks-grid { grid-template-columns: 1fr; }
 }
-
-:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
+select {
+  background: var(--color-input-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  font-family: inherit;
+  cursor: pointer;
 }
+select option {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+.model-table tbody tr:hover { background: rgba(255,255,255,0.04); }
+:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 </style>
 </head>
 <body>
@@ -363,65 +375,80 @@ body::before {
 
 <main class="main">
 
-  <!-- Stats -->
-  <div class="stats-row" id="stats-row">
+  <!-- Stats Row -->
+  <div class="stats-row">
     <div class="stat-card">
       <div class="stat-value" id="stat-online">—</div>
       <div class="stat-label">当前在线</div>
     </div>
     <div class="stat-card">
-      <div class="stat-value" id="stat-requests">—</div>
-      <div class="stat-label">累计请求</div>
+      <div class="stat-value" id="stat-uptime">—</div>
+      <div class="stat-label">运行时长</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="stat-health">—</div>
+      <div class="stat-label">服务状态</div>
     </div>
     <div class="stat-card">
       <div class="stat-value" id="stat-models">—</div>
-      <div class="stat-label">活跃模型</div>
+      <div class="stat-label">已加载模型</div>
     </div>
   </div>
 
-  <!-- Predict -->
-  <section class="predict-section">
-    <div class="section-title">图像分类推理</div>
-    <div class="upload-row">
-      <label class="file-label" for="file-input">选择图片</label>
-      <input type="file" id="file-input" accept="image/*">
-      <span id="file-name">未选择文件</span>
-      <button class="btn btn-primary" id="upload-btn" disabled>开始推理</button>
-    </div>
-    <div id="loading-hint">推理中...</div>
-    <div class="results" id="results">
-      <h3>识别结果</h3>
+  <!-- Health Checks -->
+  <section class="section">
+    <div class="section-title">服务健康</div>
+    <div class="checks-grid" id="health-checks">
+      <div class="check-card check-pending"><h4>MySQL</h4><div class="status">检查中...</div></div>
+      <div class="check-card check-pending"><h4>Redis</h4><div class="status">检查中...</div></div>
+      <div class="check-card check-pending"><h4>Models</h4><div class="status">检查中...</div></div>
     </div>
   </section>
 
-  <!-- API -->
-  <section class="api-section">
-    <div class="section-title">API 接口</div>
+  <!-- Predict -->
+  <section class="section">
+    <div class="section-title">图像分类推理</div>
+    <div class="upload-row">
+      <label class="file-label" for="file-input">选择图片</label>
+      <input type="file" id="file-input" accept="image/*" multiple>
+      <span id="file-name">未选择文件</span>
+      <select class="model-select" id="model-select"></select>
+      <button class="btn btn-primary" id="upload-btn" disabled>开始推理</button>
+    </div>
+    <div id="loading-hint">推理中...</div>
+    <div class="results" id="results"><h3>识别结果</h3></div>
+  </section>
+
+  <!-- Model Management -->
+  <section class="section">
+    <div class="section-title">模型管理</div>
+    <table class="model-table">
+      <thead><tr><th>名称</th><th>格式</th><th>状态</th><th>操作</th></tr></thead>
+      <tbody id="model-tbody"><tr><td colspan="4" style="color:var(--color-text-dim)">加载中...</td></tr></tbody>
+    </table>
+  </section>
+
+  <!-- API Reference -->
+  <section class="section">
+    <div class="section-title">API 参考</div>
     <table class="api-table">
-      <thead>
-        <tr><th>方法</th><th>路径</th><th>说明</th></tr>
-      </thead>
+      <thead><tr><th>方法</th><th>路径</th><th>说明</th></tr></thead>
       <tbody>
-        <tr>
-          <td><span class="method-badge post">POST</span></td>
-          <td>/predict</td>
-          <td>JSON 图像推理 — 提交 base64 或文件路径，返回分类结果</td>
-        </tr>
-        <tr>
-          <td><span class="method-badge post">POST</span></td>
-          <td>/predict/proto</td>
-          <td>Protobuf 推理 — 二进制协议，高吞吐场景</td>
-        </tr>
-        <tr>
-          <td><span class="method-badge get">GET</span></td>
-          <td>/metrics</td>
-          <td>Prometheus 风格实时监控指标</td>
-        </tr>
-        <tr>
-          <td><span class="method-badge get">GET</span></td>
-          <td>/backend</td>
-          <td>系统运行统计面板</td>
-        </tr>
+        <tr><td><span class="method-badge get">GET</span></td><td>/ /entry</td><td>登录/注册页面</td></tr>
+        <tr><td><span class="method-badge post">POST</span></td><td>/login</td><td>用户登录</td></tr>
+        <tr><td><span class="method-badge post">POST</span></td><td>/register</td><td>用户注册</td></tr>
+        <tr><td><span class="method-badge post">POST</span></td><td>/predict</td><td>图像推理 (JSON) — base64 或文件路径</td></tr>
+        <tr><td><span class="method-badge post">POST</span></td><td>/predict/proto</td><td>图像推理 (Protobuf) — 高吞吐</td></tr>
+        <tr><td><span class="method-badge get">GET</span></td><td>/metrics</td><td>Prometheus 格式监控指标</td></tr>
+        <tr><td><span class="method-badge get">GET</span></td><td>/metrics/json</td><td>JSON 格式监控指标</td></tr>
+        <tr><td><span class="method-badge get">GET</span></td><td>/health</td><td>存活检查 — 始终 200</td></tr>
+        <tr><td><span class="method-badge get">GET</span></td><td>/ready</td><td>就绪检查 — MySQL+Redis+Models</td></tr>
+        <tr><td><span class="method-badge get">GET</span></td><td>/models</td><td>已加载模型列表</td></tr>
+        <tr><td><span class="method-badge post">POST</span></td><td>/models/load</td><td>动态加载模型 (需登录)</td></tr>
+        <tr><td><span class="method-badge del">DELETE</span></td><td>/models/:name/:version</td><td>卸载模型 (需登录)</td></tr>
+        <tr><td><span class="method-badge get">GET</span></td><td>/backend</td><td>系统管理后台</td></tr>
+        <tr><td><span class="method-badge get">GET</span></td><td>/backend_data</td><td>在线统计 JSON</td></tr>
+        <tr><td><span class="method-badge get">GET</span></td><td>/menu</td><td>控制台 (本页)</td></tr>
       </tbody>
     </table>
   </section>
@@ -429,14 +456,12 @@ body::before {
 </main>
 
 <footer class="footer">
-  <p>AI 推理平台 &mdash; ONNX Runtime / TensorRT / C++ / RESTful</p>
+  <p>AI 推理平台 &mdash; ONNX Runtime / TensorRT / C++17 / RESTful</p>
 </footer>
 
 <script>
-/* Auth check — server-injected const userId is already available */
+/* Auth */
 if (!sessionStorage.getItem('userId')) { window.location.href = '/entry'; }
-
-/* Header */
 document.getElementById('header-user').textContent = userId;
 
 document.getElementById('btn-logout').addEventListener('click', function() {
@@ -450,7 +475,14 @@ document.getElementById('btn-logout').addEventListener('click', function() {
   });
 });
 
-/* Stats */
+/* ===== Stats ===== */
+function fmtUptime(s) {
+  if (s < 60) return s + 's';
+  if (s < 3600) return Math.floor(s/60) + 'm';
+  if (s < 86400) return Math.floor(s/3600) + 'h ' + Math.floor((s%3600)/60) + 'm';
+  return Math.floor(s/86400) + 'd ' + Math.floor((s%86400)/3600) + 'h';
+}
+
 function loadStats() {
   fetch('/backend_data')
     .then(function(r) { return r.json(); })
@@ -459,25 +491,166 @@ function loadStats() {
     })
     .catch(function() {});
 
-  fetch('/metrics')
+  fetch('/metrics/json')
     .then(function(r) { return r.json(); })
     .then(function(d) {
+      document.getElementById('stat-uptime').textContent = fmtUptime(d.uptime_seconds);
+      var eps = d.endpoints || {};
       var total = 0;
-      for (var k in d) { if (d[k].total) total += d[k].total; }
-      document.getElementById('stat-requests').textContent = total;
-      var modelCount = d['/predict'] || d['/predict/proto'] ? 1 : 0;
-      if (d['/predict'] && d['/predict/proto']) modelCount = 2;
-      document.getElementById('stat-models').textContent = modelCount;
+      for (var k in eps) { total += (eps[k].total || 0); }
+    })
+    .catch(function() {});
+
+  fetch('/ready')
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      var el = document.getElementById('stat-health');
+      if (d.status === 'ready') {
+        el.textContent = '健康';
+        el.className = 'stat-value stat-ok';
+      } else {
+        el.textContent = '异常';
+        el.className = 'stat-value stat-err';
+      }
+      updateHealthChecks(d.checks);
     })
     .catch(function() {
-      document.getElementById('stat-requests').textContent = '—';
-      document.getElementById('stat-models').textContent = '—';
+      document.getElementById('stat-health').textContent = '离线';
+      document.getElementById('stat-health').className = 'stat-value stat-err';
     });
+
+  fetch('/models')
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      document.getElementById('stat-models').textContent = Array.isArray(d) ? d.length : 0;
+    })
+    .catch(function() {});
 }
+
+function updateHealthChecks(checks) {
+  if (!checks) return;
+  var names = ['mysql','redis','models'];
+  var labels = ['MySQL','Redis','Models'];
+  var html = '';
+  for (var i = 0; i < names.length; i++) {
+    var ok = checks[names[i]];
+    var cls = ok ? 'check-pass' : 'check-fail';
+    html += '<div class="check-card '+cls+'"><h4>'+labels[i]+'</h4><div class="status">'+(ok ? '正常' : '异常')+'</div></div>';
+  }
+  document.getElementById('health-checks').innerHTML = html;
+}
+
 loadStats();
 setInterval(loadStats, 30000);
 
-/* Predict */
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* ===== Model Table: merge /models + /models/available ===== */
+var loadedModels = [];  // [{name, version, type, path, is_latest}]
+function loadModelTable() {
+  Promise.all([
+    fetch('/models').then(function(r) { return r.json(); }),
+    fetch('/models/available').then(function(r) { return r.json(); })
+  ])
+  .then(function(results) {
+    loadedModels = results[0];
+    var files = results[1];
+    var tbody = document.getElementById('model-tbody');
+
+    if (!files.length) {
+      tbody.innerHTML = '<tr><td colspan="4" style="color:var(--color-text-dim)">暂无模型文件</td></tr>';
+      return;
+    }
+
+    var html = '';
+    files.forEach(function(f) {
+      var typeBadge = f.type === 'tensorrt'
+        ? '<span class="badge badge-trt">TensorRT</span>'
+        : '<span class="badge badge-onnx">ONNX</span>';
+
+      // Check if this file is loaded (match by name+type, or by path+type)
+      var loaded = null;
+      for (var i = 0; i < loadedModels.length; i++) {
+        if ((loadedModels[i].name === f.name || loadedModels[i].path === f.path)
+            && loadedModels[i].type === f.type) {
+          loaded = loadedModels[i];
+          break;
+        }
+      }
+
+      var statusHtml, actionHtml;
+      if (loaded) {
+        statusHtml = '<span style="color:var(--color-success);font-size:0.8rem">已加载 (v' + esc(loaded.version) + ')</span>';
+        actionHtml = '<button class="btn btn-danger btn-sm btn-unload" data-name="'+esc(loaded.name)+'" data-version="'+esc(loaded.version)+'">卸载</button>';
+      } else {
+        statusHtml = '<span style="color:var(--color-text-dim);font-size:0.8rem">未加载</span>';
+        actionHtml = '<button class="btn btn-primary btn-sm btn-load-file" data-name="'+esc(f.name)+'" data-type="'+esc(f.type)+'" data-path="'+esc(f.path)+'">加载</button>';
+      }
+
+      html += '<tr>';
+      html += '<td>'+esc(f.name)+'</td>';
+      html += '<td>'+typeBadge+'</td>';
+      html += '<td>'+statusHtml+'</td>';
+      html += '<td>'+actionHtml+'</td>';
+      html += '</tr>';
+    });
+    tbody.innerHTML = html;
+
+    // Populate predict model select from loaded models
+    var sel = document.getElementById('model-select');
+    sel.innerHTML = '';
+    loadedModels.forEach(function(m) {
+      sel.innerHTML += '<option value="'+esc(m.name)+'">'+esc(m.name)+' ('+esc(m.type)+')</option>';
+    });
+
+    // Bind unload buttons
+    tbody.querySelectorAll('.btn-unload').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var name = this.dataset.name;
+        var ver  = this.dataset.version;
+        if (!confirm('确定要卸载 ' + name + ':' + ver + ' 吗？')) return;
+        fetch('/models/' + encodeURIComponent(name) + '/' + encodeURIComponent(ver), { method: 'DELETE' })
+          .then(function(r) { return r.json(); })
+          .then(function(d) {
+            if (d.status === 'ok') { loadModelTable(); loadStats(); }
+            else { alert('卸载失败: ' + (d.message || '')); }
+          })
+          .catch(function() { alert('网络错误'); });
+      });
+    });
+
+    // Bind load buttons (submit directly)
+    tbody.querySelectorAll('.btn-load-file').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var name = this.dataset.name;
+        var type = this.dataset.type;
+        var path = this.dataset.path;
+        btn.disabled = true;
+        btn.textContent = '加载中...';
+        fetch('/models/load', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name, version: '1', type: type, path: path })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          if (d.status === 'ok') { loadModelTable(); loadStats(); }
+          else { alert('加载失败: ' + (d.message || '')); btn.disabled = false; btn.textContent = '加载'; }
+        })
+        .catch(function() { alert('网络错误'); btn.disabled = false; btn.textContent = '加载'; });
+      });
+    });
+  })
+  .catch(function() {
+    document.getElementById('model-tbody').innerHTML = '<tr><td colspan="4" style="color:var(--color-error)">加载失败</td></tr>';
+  });
+}
+
+loadModelTable();
+
+/* ===== Predict ===== */
 var fileInput = document.getElementById('file-input');
 var fileName  = document.getElementById('file-name');
 var uploadBtn = document.getElementById('upload-btn');
@@ -486,7 +659,7 @@ var results   = document.getElementById('results');
 
 fileInput.addEventListener('change', function() {
   if (fileInput.files.length > 0) {
-    fileName.textContent = fileInput.files[0].name;
+    fileName.textContent = '已选 ' + fileInput.files.length + ' 张图片';
     uploadBtn.disabled = false;
   } else {
     fileName.textContent = '未选择文件';
@@ -495,34 +668,49 @@ fileInput.addEventListener('change', function() {
 });
 
 uploadBtn.addEventListener('click', function() {
-  var file = fileInput.files[0];
-  if (!file) return;
+  var files = fileInput.files;
+  if (files.length === 0) return;
+
+  var modelName = document.getElementById('model-select').value;
 
   uploadBtn.disabled = true;
   hint.style.display = 'block';
   results.style.display = 'none';
 
-  var reader = new FileReader();
-  reader.onload = function() {
-    fetch('/predict', {
+  var loaded = 0;
+  var images = [];
+
+  function submitBatch() {
+    fetch('/predict/batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image_data: reader.result.split(',')[1] })
+      body: JSON.stringify({ images: images, model_name: modelName })
     })
     .then(function(r) { return r.json(); })
     .then(function(data) {
       hint.style.display = 'none';
       uploadBtn.disabled = false;
-      results.innerHTML = '<h3>识别结果</h3>';
-      if (data.status === 'ok' && data.predictions) {
-        data.predictions.forEach(function(p) {
-          var item = document.createElement('div');
-          item.className = 'result-item';
-          item.innerHTML = '<span>' + p.label + '</span><span class="score">' + p.confidence.toFixed(1) + '%</span>';
-          results.appendChild(item);
+      results.innerHTML = '<h3>识别结果 (' + data.count + ' 张)</h3>';
+      if (data.status === 'ok' && data.results) {
+        data.results.forEach(function(r, idx) {
+          var name = files[idx] ? files[idx].name : ('图片 ' + (idx + 1));
+          var card = document.createElement('div');
+          card.style.cssText = 'margin-bottom:12px;padding:10px;background:var(--color-input-bg);border-radius:8px';
+          card.innerHTML = '<div style="font-size:0.8rem;color:var(--color-text-dim);margin-bottom:6px">' + esc(name) + '</div>';
+          if (r.predictions) {
+            r.predictions.forEach(function(p) {
+              var item = document.createElement('div');
+              item.className = 'result-item';
+              item.innerHTML = '<span>'+esc(p.label)+'</span><span class="score">'+p.confidence.toFixed(1)+'%</span>';
+              card.appendChild(item);
+            });
+          } else if (r.status === 'error') {
+            card.innerHTML += '<p style="color:var(--color-error);font-size:0.85rem;margin-top:4px">错误: '+esc(r.message||'')+'</p>';
+          }
+          results.appendChild(card);
         });
       } else {
-        results.innerHTML += '<p style="color:var(--color-error)">识别失败</p>';
+        results.innerHTML += '<p style="color:var(--color-error)">识别失败: '+(data.message||'')+'</p>';
       }
       results.style.display = 'block';
     })
@@ -532,8 +720,21 @@ uploadBtn.addEventListener('click', function() {
       results.innerHTML = '<h3>识别结果</h3><p style="color:var(--color-error)">网络错误</p>';
       results.style.display = 'block';
     });
-  };
-  reader.readAsDataURL(file);
+  }
+
+  for (var i = 0; i < files.length; i++) {
+    (function(file) {
+      var reader = new FileReader();
+      reader.onload = function() {
+        images.push(reader.result.split(',')[1]);
+        loaded++;
+        if (loaded === files.length) {
+          submitBatch();
+        }
+      };
+      reader.readAsDataURL(file);
+    })(files[i]);
+  }
 });
 </script>
 

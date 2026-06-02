@@ -20,6 +20,7 @@ public:
         k404NotFound = 404,
         k409Conflict = 409,
         k500InternalServerError = 500,
+        k503ServiceUnavailable = 503,
     };
 
     HttpResponse(bool close = true)
@@ -54,10 +55,16 @@ public:
     { headers_[key] = value; }
     
     void setBody(const std::string& body)
-    { 
+    {
         body_ = body;
         // body_ += "\0";
     }
+
+    void setRequestId(const std::string& id) { requestId_ = id; }
+    std::string getRequestId() const { return requestId_; }
+
+    void setClientIp(const std::string& ip) { clientIp_ = ip; }
+    std::string getClientIp() const { return clientIp_; }
 
     void setStatusLine(const std::string& version,
                          HttpStatusCode statusCode,
@@ -74,6 +81,8 @@ private:
     std::map<std::string, std::string> headers_;
     std::string                        body_;
     bool                               isFile_;
+    std::string                        requestId_;
+    std::string                        clientIp_;
 };
 
 } // namespace http

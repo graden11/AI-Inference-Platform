@@ -37,9 +37,8 @@ RUN ldconfig
 # Copy binary from builder
 COPY --from=builder /project/build/simple_server /app/simple_server
 
-# Copy ONNX model and labels
-COPY WebApps/InferenceServer/models/resnet50_classification.onnx /app/models/
-COPY WebApps/InferenceServer/models/imagenet_classes.txt        /app/models/
+# Copy model files from unified models/ directory
+COPY models/ /app/models/
 
 # Copy HTML resources (handlers use relative path ../WebApps/InferenceServer/resource/)
 COPY WebApps/InferenceServer/resource/ /WebApps/InferenceServer/resource/
@@ -48,7 +47,10 @@ COPY WebApps/InferenceServer/resource/ /WebApps/InferenceServer/resource/
 COPY WebApps/InferenceServer/config.json /app/config.json
 RUN sed -i 's|/project/WebApps/InferenceServer/models/|models/|g' /app/config.json
 
+COPY docker-entrypoint.sh /app/
+RUN chmod +x /app/docker-entrypoint.sh
+
 WORKDIR /app
 EXPOSE 80
 
-CMD ["./simple_server", "-c", "config.json"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

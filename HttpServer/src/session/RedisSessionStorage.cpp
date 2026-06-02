@@ -105,6 +105,7 @@ std::shared_ptr<Session> RedisSessionStorage::deserialize(const std::string& jso
 
 void RedisSessionStorage::save(std::shared_ptr<Session> session)
 {
+    std::lock_guard<std::mutex> lock(redisMutex_);
     if (!ctx_) reconnect();
     if (!ctx_) return;
 
@@ -118,6 +119,7 @@ void RedisSessionStorage::save(std::shared_ptr<Session> session)
 
 std::shared_ptr<Session> RedisSessionStorage::load(const std::string& sessionId)
 {
+    std::lock_guard<std::mutex> lock(redisMutex_);
     if (!ctx_) reconnect();
     if (!ctx_) return nullptr;
 
@@ -137,6 +139,7 @@ std::shared_ptr<Session> RedisSessionStorage::load(const std::string& sessionId)
 
 void RedisSessionStorage::remove(const std::string& sessionId)
 {
+    std::lock_guard<std::mutex> lock(redisMutex_);
     if (!ctx_) reconnect();
     if (!ctx_) return;
 

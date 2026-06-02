@@ -29,6 +29,20 @@ public:
     bool setMethod(const char* start, const char* end);
     Method method() const { return method_; }
 
+    std::string methodString() const
+    {
+        switch (method_)
+        {
+            case kGet:     return "GET";
+            case kPost:    return "POST";
+            case kHead:    return "HEAD";
+            case kPut:     return "PUT";
+            case kDelete:  return "DELETE";
+            case kOptions: return "OPTIONS";
+            default:       return "UNKNOWN";
+        }
+    }
+
     void setPath(const char* start, const char* end);
     std::string path() const { return path_; }
 

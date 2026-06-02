@@ -3,7 +3,7 @@ services:
     image: mysql:8.0
     container_name: kama-mysql
     environment:
-      MYSQL_ROOT_PASSWORD: root
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
       MYSQL_DATABASE: inference_platform
     ports:
       - "3306:3306"
@@ -37,6 +37,9 @@ services:
     container_name: kama-httpserver
     ports:
       - "80:80"
+    environment:
+      MYSQL_USER: ${MYSQL_USER:-root}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-root}
     depends_on:
       mysql:
         condition: service_healthy

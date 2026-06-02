@@ -27,7 +27,7 @@ void ProtoPredictHandler::handle(const http::HttpRequest &req, http::HttpRespons
     }
 
     std::string modelName = request.model_name().empty() ? "resnet50" : request.model_name();
-    auto *engine = factory_->getModel(modelName);
+    auto engine = factory_->getModel(modelName);
     if (!engine)
     {
         inference::PredictResponse response;

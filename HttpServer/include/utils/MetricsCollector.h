@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdint>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 
@@ -32,9 +33,11 @@ public:
         return mc;
     }
 
-    void record(const std::string &endpoint, int64_t latency_us, bool is_error)
+    void setInflightSource(const std::atomic<int>* src) { inflightSrc_ = src; }
+
+    void record(const std::string &endpoint, const std::string &method, int64_t latency_us, bool is_error)
     {
-        auto &m = getOrCreate(endpoint);
+        auto &m = getOrCreate(method + ":" + endpoint);
         m.total.fetch_add(1, std::memory_order_relaxed);
         if (is_error)
             m.errors.fetch_add(1, std::memory_order_relaxed);
@@ -66,6 +69,7 @@ public:
 
     nlohmann::json toJson() const
     {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
         nlohmann::json j;
         j["uptime_seconds"] = uptimeSeconds();
 
@@ -100,6 +104,78 @@ public:
         return j;
     }
 
+    std::string toPrometheus() const
+    {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        std::string out;
+
+        auto addMetric = [&](const std::string &name, const std::string &help,
+                             const std::string &type, const std::string &body) {
+            out += "# HELP " + name + " " + help + "\n";
+            out += "# TYPE " + name + " " + type + "\n";
+            out += body;
+        };
+
+        // Counters: total + errors
+        std::string totalBody, errorsBody;
+        for (auto &[key, m] : endpoints_)
+        {
+            auto colonPos = key.find(':');
+            std::string method = (colonPos != std::string::npos) ? key.substr(0, colonPos) : "UNKNOWN";
+            std::string path   = (colonPos != std::string::npos) ? key.substr(colonPos + 1) : key;
+            std::string labels = "{endpoint=\"" + path + "\",method=\"" + method + "\"}";
+
+            int64_t t = m.total.load(std::memory_order_relaxed);
+            int64_t e = m.errors.load(std::memory_order_relaxed);
+            totalBody  += "http_requests_total"  + labels + " " + std::to_string(t) + "\n";
+            errorsBody += "http_request_errors_total" + labels + " " + std::to_string(e) + "\n";
+        }
+        addMetric("http_requests_total", "Total number of HTTP requests", "counter", totalBody);
+        addMetric("http_request_errors_total", "Total number of HTTP request errors", "counter", errorsBody);
+
+        // Histogram: latency buckets
+        std::string histBody;
+        for (auto &[key, m] : endpoints_)
+        {
+            auto colonPos = key.find(':');
+            std::string method = (colonPos != std::string::npos) ? key.substr(0, colonPos) : "UNKNOWN";
+            std::string path   = (colonPos != std::string::npos) ? key.substr(colonPos + 1) : key;
+            std::string labels = "{endpoint=\"" + path + "\",method=\"" + method + "\"}";
+
+            int64_t b10ms  = m.bucket_10ms.load(std::memory_order_relaxed);
+            int64_t b50ms  = m.bucket_50ms.load(std::memory_order_relaxed);
+            int64_t b100ms = m.bucket_100ms.load(std::memory_order_relaxed);
+            int64_t b500ms = m.bucket_500ms.load(std::memory_order_relaxed);
+            int64_t bInf   = m.bucket_inf.load(std::memory_order_relaxed);
+            int64_t total  = b10ms + b50ms + b100ms + b500ms + bInf;
+            int64_t sum    = m.latency_us_sum.load(std::memory_order_relaxed);
+
+            histBody += "http_request_duration_microseconds_bucket" + labels + "{le=\"10000\"} " + std::to_string(b10ms) + "\n";
+            histBody += "http_request_duration_microseconds_bucket" + labels + "{le=\"50000\"} " + std::to_string(b10ms + b50ms) + "\n";
+            histBody += "http_request_duration_microseconds_bucket" + labels + "{le=\"100000\"} " + std::to_string(b10ms + b50ms + b100ms) + "\n";
+            histBody += "http_request_duration_microseconds_bucket" + labels + "{le=\"500000\"} " + std::to_string(b10ms + b50ms + b100ms + b500ms) + "\n";
+            histBody += "http_request_duration_microseconds_bucket" + labels + "{le=\"+Inf\"} " + std::to_string(total) + "\n";
+            histBody += "http_request_duration_microseconds_count" + labels + " " + std::to_string(total) + "\n";
+            histBody += "http_request_duration_microseconds_sum" + labels + " " + std::to_string(sum) + "\n";
+        }
+        addMetric("http_request_duration_microseconds", "HTTP request latency in microseconds", "histogram", histBody);
+
+        // Inflight gauge
+        if (inflightSrc_)
+        {
+            std::string inflightVal = std::to_string(inflightSrc_->load(std::memory_order_relaxed));
+            addMetric("http_requests_inflight", "Currently in-flight HTTP requests", "gauge",
+                      "http_requests_inflight " + inflightVal + "\n");
+        }
+
+        // Uptime gauge
+        int64_t uptime = uptimeSeconds();
+        addMetric("process_uptime_seconds", "Process uptime in seconds", "gauge",
+                  "process_uptime_seconds " + std::to_string(uptime) + "\n");
+
+        return out;
+    }
+
 private:
     MetricsCollector() : startTime_(muduo::Timestamp::now()) {}
 
@@ -111,17 +187,20 @@ private:
 
     EndpointMetrics &getOrCreate(const std::string &name)
     {
-        // Fast path: read without lock
-        auto it = endpoints_.find(name);
-        if (it != endpoints_.end())
-            return it->second;
-
-        // Slow path: create under lock
-        std::lock_guard<std::mutex> lock(mutex_);
+        // Fast path: read with shared lock
+        {
+            std::shared_lock<std::shared_mutex> lock(mutex_);
+            auto it = endpoints_.find(name);
+            if (it != endpoints_.end())
+                return it->second;
+        }
+        // Slow path: create under exclusive lock
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         return endpoints_[name];
     }
 
     muduo::Timestamp startTime_;
     std::unordered_map<std::string, EndpointMetrics> endpoints_;
-    mutable std::mutex mutex_;
+    mutable std::shared_mutex mutex_;
+    const std::atomic<int>* inflightSrc_ = nullptr;
 };

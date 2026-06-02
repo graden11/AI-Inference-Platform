@@ -22,6 +22,11 @@ class LogoutHandler;
 class GameBackendHandler;
 class PredictHandler;
 class ProtoPredictHandler;
+class ModelLoadHandler;
+class ModelListHandler;
+class ModelUnloadHandler;
+class RequestBatcher;
+class ReadyHandler;
 
 
 class InferenceServer
@@ -32,6 +37,14 @@ public:
 
     void setThreadNum(int numThreads);
     void start();
+    void cleanup();
+
+    const std::string& getConfigPath() const { return configPath_; }
+    void setConfigPath(const std::string& path) { configPath_ = path; }
+
+    muduo::net::EventLoop* getLoop() { return httpServer_.getLoop(); }
+    int getShutdownTimeoutMs() const { return config_.server.shutdown_timeout_ms; }
+    void gracefulShutdown(std::chrono::milliseconds timeout) { httpServer_.gracefulShutdown(timeout); }
 private:
     void initialize();
     void initializeSession();
@@ -52,7 +65,10 @@ private:
     {
         return modelFactory_.get();
     }
-    
+
+    const std::string& getLabelsPath() const { return config_.labels_path; }
+    void saveConfig() const;
+
     void getBackendData(const http::HttpRequest& req, http::HttpResponse* resp);
 
     void packageResp(const std::string& version, http::HttpResponse::HttpStatusCode statusCode,
@@ -97,6 +113,10 @@ private:
     friend class LogoutHandler;
     friend class GameBackendHandler;
     friend class ProtoPredictHandler;
+    friend class ModelLoadHandler;
+    friend class ModelListHandler;
+    friend class ModelUnloadHandler;
+    friend class ReadyHandler;
 
 private:
     http::HttpServer                                 httpServer_;
@@ -111,6 +131,9 @@ private:
     std::atomic<int>                                 maxOnline_;
     // 模型工厂
     std::unique_ptr<ModelFactory>                    modelFactory_;
+    // 动态批处理（shared_ptr 因为 PredictHandler 需要持有引用）
+    std::shared_ptr<RequestBatcher>                  batcher_;
     // 应用配置
     AppConfig                                        config_;
+    std::string                                      configPath_;
 };

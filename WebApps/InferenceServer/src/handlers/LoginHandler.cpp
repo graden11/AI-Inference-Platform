@@ -37,8 +37,15 @@ void LoginHandler::handle(const http::HttpRequest &req, http::HttpResponse *resp
             session->setValue("userId", std::to_string(userId));
             session->setValue("username", username);
             session->setValue("isLoggedIn", "true");
-            bool alreadyOnline = server_->onlineUsers_.find(userId) != server_->onlineUsers_.end()
-                                 && server_->onlineUsers_[userId] == true;
+            int onlineCount = 0;
+            bool alreadyOnline = false;
+            {
+                std::lock_guard<std::mutex> lock(server_->mutexForOnlineUsers_);
+                alreadyOnline = server_->onlineUsers_.find(userId) != server_->onlineUsers_.end()
+                                && server_->onlineUsers_[userId] == true;
+                server_->onlineUsers_[userId] = true;
+                onlineCount = static_cast<int>(server_->onlineUsers_.size());
+            }
 
             if (alreadyOnline)
             {
@@ -49,14 +56,10 @@ void LoginHandler::handle(const http::HttpRequest &req, http::HttpResponse *resp
             }
 
             {
-                std::lock_guard<std::mutex> lock(server_->mutexForOnlineUsers_);
-                server_->onlineUsers_[userId] = true;
-            }
-            {
                 std::lock_guard<std::mutex> lock(server_->mutexForLoginSessions_);
                 server_->loginSessions_[userId] = session->getId();
             }
-            server_->updateMaxOnline(server_->onlineUsers_.size());
+            server_->updateMaxOnline(onlineCount);
 
             json successResp;
             successResp["success"] = true;

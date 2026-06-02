@@ -4,10 +4,13 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <atomic>
+#include <chrono>
 #include <functional>
 #include <iostream>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 
 #include <muduo/net/TcpServer.h>
@@ -47,6 +50,16 @@ public:
     }
 
     void start();
+
+    void stop();
+
+    void gracefulShutdown(std::chrono::milliseconds timeout);
+
+    void setAccepting(bool on) { accepting_.store(on); }
+    bool isAccepting() const { return accepting_.load(); }
+    bool isShuttingDown() const { return shuttingDown_.load(); }
+    int getInflightCount() const { return inflightCount_.load(); }
+    const std::atomic<int>* getInflightPtr() const { return &inflightCount_; }
 
     muduo::net::EventLoop* getLoop() const 
     { 
@@ -138,8 +151,13 @@ private:
     middleware::MiddlewareChain                  middlewareChain_; // 中间件链
     std::unique_ptr<ssl::SslContext>             sslCtx_; // SSL 上下文
     bool                                         useSSL_; // 是否使用 SSL   
-    // TcpConnectionPtr -> SslConnectionPtr 
+    // TcpConnectionPtr -> SslConnectionPtr
     std::map<muduo::net::TcpConnectionPtr, std::unique_ptr<ssl::SslConnection>> sslConns_;
+    mutable std::mutex sslConnsMutex_;
+
+    std::atomic<bool> accepting_{true};
+    std::atomic<bool> shuttingDown_{false};
+    std::atomic<int>  inflightCount_{0};
 }; 
 
 } // namespace http

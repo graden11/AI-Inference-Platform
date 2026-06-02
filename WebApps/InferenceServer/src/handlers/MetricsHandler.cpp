@@ -3,11 +3,22 @@
 
 void MetricsHandler::handle(const http::HttpRequest &req, http::HttpResponse *resp)
 {
-    auto json = MetricsCollector::instance().toJson();
-    std::string body = json.dump(2);
+    std::string body;
+    std::string contentType;
+
+    if (req.path() == "/metrics/json")
+    {
+        body = MetricsCollector::instance().toJson().dump(2);
+        contentType = "application/json";
+    }
+    else
+    {
+        body = MetricsCollector::instance().toPrometheus();
+        contentType = "text/plain; version=0.0.4";
+    }
 
     resp->setStatusLine(req.getVersion(), http::HttpResponse::k200Ok, "OK");
-    resp->setContentType("application/json");
+    resp->setContentType(contentType);
     resp->setContentLength(body.size());
     resp->setBody(body);
     resp->setCloseConnection(false);

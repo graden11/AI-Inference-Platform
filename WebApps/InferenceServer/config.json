@@ -3,7 +3,8 @@
     "port": 80,
     "name": "HttpServer",
     "threads": 4,
-    "log_level": "WARN"
+    "log_level": "INFO",
+    "shutdown_timeout_ms": 30000
   },
   "logging": {
     "level": "INFO",
@@ -16,26 +17,32 @@
   },
   "mysql": {
     "host": "tcp://mysql:3306",
-    "user": "root",
-    "password": "root",
+    "user": "",
+    "password": "",
     "database": "inference_platform",
     "pool_size": 10
   },
   "models": {
-    "labels_path": "/project/WebApps/InferenceServer/models/imagenet_classes.txt",
+    "labels_path": "models/imagenet_classes.txt",
     "engines": {
       "resnet50": {
         "type": "onnx",
-        "path": "/project/WebApps/InferenceServer/models/resnet50_classification.onnx"
+        "path": "models/resnet50_classification.onnx"
       },
       "resnet50_trt": {
         "type": "tensorrt",
-        "path": "/project/WebApps/InferenceServer/models/resnet50_classification.engine"
+        "path": "models/resnet50_classification.engine"
       },
       "resnet50_int8": {
         "type": "tensorrt",
-        "path": "/project/WebApps/InferenceServer/models/resnet50_int8.engine"
+        "path": "models/resnet50_int8.engine"
       }
     }
-  }
+  },
+  "batching": {
+    "enabled": false,
+    "max_batch_size": 8,
+    "max_delay_ms": 10
+  },
+  "dynamic_engines": []
 }

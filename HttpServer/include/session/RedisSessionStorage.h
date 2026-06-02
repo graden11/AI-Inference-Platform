@@ -1,6 +1,7 @@
 #pragma once
 
 #include "SessionStorage.h"
+#include <mutex>
 #include <string>
 #include <hiredis/hiredis.h>
 
@@ -22,6 +23,7 @@ private:
     redisContext* ctx_;
     std::string host_;
     int port_;
+    std::mutex redisMutex_;
 
     void reconnect();
     std::string serialize(const Session& session) const;

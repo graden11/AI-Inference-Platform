@@ -5,6 +5,10 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
+#include <atomic>
+#include <chrono>
+#include <iomanip>
+#include <sstream>
 #include <memory>
 #include <string>
 
@@ -30,4 +34,22 @@ inline void initSpdLog(const std::string &logPath = "server.log",
     spdlog::info("spdlog initialized, level={}", level);
 }
 
-#define LOG_ACCESS(...) spdlog::info(__VA_ARGS__)
+inline void initAccessLog(const std::string &logPath = "access.log")
+{
+    auto fileSink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(logPath, true);
+    auto accessLogger = std::make_shared<spdlog::logger>("access", fileSink);
+    accessLogger->set_pattern("%v");
+    accessLogger->flush_on(spdlog::level::info);
+    spdlog::register_logger(accessLogger);
+}
+
+inline std::string generateRequestId()
+{
+    static std::atomic<uint64_t> counter{0};
+    uint64_t id = counter.fetch_add(1);
+    std::ostringstream oss;
+    oss << std::hex << id;
+    return oss.str();
+}
+
+#define LOG_ACCESS(...) spdlog::get("access")->info(__VA_ARGS__)

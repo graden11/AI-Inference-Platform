@@ -15,11 +15,15 @@
 class ResNet50TRTEngine : public InferenceEngine
 {
 public:
-    ResNet50TRTEngine(const std::string &enginePath, const std::string &labelsPath);
+    ResNet50TRTEngine(const std::string &enginePath, const std::string &labelsPath,
+                      int maxBatchSize = 1);
     ~ResNet50TRTEngine() override;
 
     std::string predict(const std::string &imagePath) override;
     std::string predictFromBytes(const std::vector<uint8_t> &imageData) override;
+
+    int maxBatchSize() const override { return maxBatchSize_; }
+    std::vector<std::string> predictBatch(const std::vector<std::vector<uint8_t>> &images) override;
 
 private:
     struct BufferSlot {
@@ -40,6 +44,7 @@ private:
                     uint8_t *h_resized_pinned, float *h_input_pinned);
     void runInference(int slotIdx, std::vector<std::pair<int, float>> &results);
     bool loadEngine(const std::string &enginePath);
+    static bool buildEngine(const std::string &onnxPath, const std::string &enginePath);
 
     class Logger : public nvinfer1::ILogger
     {
@@ -63,4 +68,14 @@ private:
     BufferSlot slots_[kNumSlots];
     std::mutex slot_pool_mutex_;
     std::condition_variable slot_pool_cv_;
+
+    // Batch buffers
+    int maxBatchSize_{1};
+    float *h_batch_input_{nullptr};
+    float *h_batch_output_{nullptr};
+    void *d_batch_input_{nullptr};
+    void *d_batch_output_{nullptr};
+    size_t perSampleInputSize_{0};
+    size_t perSampleOutputSize_{0};
+    void allocateBatchBuffers();
 };
