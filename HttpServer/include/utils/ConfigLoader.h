@@ -251,6 +251,9 @@ inline AppConfig loadConfig(const std::string &filePath)
             dme.input_width    = entry.value("input_width", 224);
             dme.input_height   = entry.value("input_height", 224);
             dme.input_channels = entry.value("input_channels", 3);
+            dme.confidence_threshold = entry.value("confidence_threshold", 0.5f);
+            dme.nms_threshold  = entry.value("nms_threshold", 0.45f);
+            dme.max_detections = entry.value("max_detections", 100);
             if (entry.contains("input_mean"))
             {
                 dme.input_mean.clear();

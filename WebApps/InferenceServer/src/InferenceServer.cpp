@@ -372,6 +372,18 @@ void InferenceServer::saveConfig() const
                 entry["type"] = m.type;
                 entry["path"] = m.path;
                 entry["task"] = m.task;
+                entry["labels"] = m.labels;
+                entry["top_k"] = m.top_k;
+                entry["input_name"]     = m.input_name;
+                entry["output_name"]    = m.output_name;
+                entry["input_width"]    = m.input_width;
+                entry["input_height"]   = m.input_height;
+                entry["input_channels"] = m.input_channels;
+                entry["input_mean"]     = m.input_mean;
+                entry["input_std"]      = m.input_std;
+                entry["confidence_threshold"] = m.confidence_threshold;
+                entry["nms_threshold"]  = m.nms_threshold;
+                entry["max_detections"] = m.max_detections;
                 dynamicEngines.push_back(entry);
             }
         }

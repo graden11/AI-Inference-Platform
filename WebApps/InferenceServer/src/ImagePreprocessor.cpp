@@ -32,7 +32,7 @@ std::vector<float> ImagePreprocessor::preprocess(const std::vector<uint8_t>& ima
     }
 
     // Resize to target dimensions using bilinear interpolation
-    thread_local std::vector<uint8_t> resized(targetH_ * targetW_ * targetC_);
+    std::vector<uint8_t> resized(targetH_ * targetW_ * targetC_);
     stbir_resize_uint8_srgb(data, w, h, 0,
                             resized.data(), targetW_, targetH_, 0,
                             static_cast<stbir_pixel_layout>(targetC_));
@@ -40,7 +40,7 @@ std::vector<float> ImagePreprocessor::preprocess(const std::vector<uint8_t>& ima
 
     // Normalize, standardize, HWC → CHW
     int elemCount = targetC_ * targetH_ * targetW_;
-    thread_local std::vector<float> input(elemCount);
+    std::vector<float> input(elemCount);
 
     for (int c = 0; c < targetC_; ++c)
     {

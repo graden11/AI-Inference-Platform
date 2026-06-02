@@ -18,7 +18,38 @@ public:
         std::string type;
         std::string path;
         std::string task;
+        std::string labels;
+        int top_k = 5;
+        int input_width = 224;
+        int input_height = 224;
+        int input_channels = 3;
+        std::string input_name = "input";
+        std::string output_name = "output";
+        std::vector<float> input_mean = {0.485f, 0.456f, 0.406f};
+        std::vector<float> input_std  = {0.229f, 0.224f, 0.225f};
+        float confidence_threshold = 0.5f;
+        float nms_threshold = 0.45f;
+        int   max_detections = 100;
         bool is_latest = false;
+    };
+
+    // Internal full metadata struct (public for use by saveConfig / loadModel)
+    struct ModelMeta {
+        std::string type;
+        std::string path;
+        std::string task = "classification";
+        std::string labels;
+        int top_k = 5;
+        int input_width = 224;
+        int input_height = 224;
+        int input_channels = 3;
+        std::string input_name = "input";
+        std::string output_name = "output";
+        std::vector<float> input_mean = {0.485f, 0.456f, 0.406f};
+        std::vector<float> input_std  = {0.229f, 0.224f, 0.225f};
+        float confidence_threshold = 0.5f;
+        float nms_threshold = 0.45f;
+        int   max_detections = 100;
     };
 
     // Parse "name:version" into (name, version). Empty version means "latest".
@@ -64,6 +95,9 @@ public:
     // Number of loaded model versions (for config serialization)
     size_t modelCount() const;
 
+    // Get full metadata for a model (used by saveConfig)
+    const ModelMeta* getFullMeta(const std::string& name, const std::string& version) const;
+
 private:
     // name -> (version -> shared_ptr<InferenceEngine>)
     std::unordered_map<std::string,
@@ -73,6 +107,9 @@ private:
     // name -> (version -> {type, path, task})
     std::unordered_map<std::string,
         std::map<std::string, std::tuple<std::string, std::string, std::string>>> metadata_;
+    // name -> (version -> full metadata for persistence)
+    std::unordered_map<std::string,
+        std::map<std::string, ModelMeta>> fullMeta_;
 
     mutable std::shared_mutex mutex_;
 };

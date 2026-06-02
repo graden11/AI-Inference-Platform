@@ -41,6 +41,35 @@ int ModelFactory::compareVersions(const std::string& a, const std::string& b)
     return 0;
 }
 
+// --- Helpers using ModelFactory::ModelMeta ---
+
+static ModelFactory::ModelMeta extractMeta(const std::string& type, const std::string& path,
+                              std::shared_ptr<InferenceEngine> engine)
+{
+    ModelFactory::ModelMeta m;
+    m.type = type;
+    m.path = path;
+    m.task = "classification";
+    auto* pipeline = dynamic_cast<inference::ModelPipeline*>(engine.get());
+    if (pipeline) {
+        const auto& cfg = pipeline->config();
+        m.task        = inference::taskTypeToString(cfg.task);
+        m.labels      = cfg.labels_path;
+        m.top_k       = cfg.top_k;
+        m.input_width  = cfg.input.preferred_width;
+        m.input_height = cfg.input.preferred_height;
+        m.input_channels = cfg.input.channels;
+        m.input_name   = cfg.input.name;
+        m.output_name  = cfg.output.name;
+        m.input_mean   = cfg.input.mean;
+        m.input_std    = cfg.input.std;
+        m.confidence_threshold = cfg.confidence_threshold;
+        m.nms_threshold = cfg.nms_threshold;
+        m.max_detections = cfg.max_detections;
+    }
+    return m;
+}
+
 void ModelFactory::registerModel(const std::string& name,
                                   const std::string& version,
                                   std::shared_ptr<InferenceEngine> engine,
@@ -49,13 +78,8 @@ void ModelFactory::registerModel(const std::string& name,
 {
     std::unique_lock lock(mutex_);
     models_[name][version] = std::move(engine);
-
-    // Read the actual task type from the ModelPipeline if available
-    std::string task = "classification";
-    auto* pipeline = dynamic_cast<inference::ModelPipeline*>(models_[name][version].get());
-    if (pipeline)
-        task = inference::taskTypeToString(pipeline->config().task);
-    metadata_[name][version] = {type, path, task};
+    metadata_[name][version] = {type, path, "classification"};
+    fullMeta_[name][version] = extractMeta(type, path, models_[name][version]);
 
     // Update latest version
     auto it = latestVersions_.find(name);
@@ -108,11 +132,13 @@ bool ModelFactory::unloadModel(const std::string& name, const std::string& versi
 
     versions.erase(verIt);
     metadata_[name].erase(version);
+    fullMeta_[name].erase(version);
 
     // Recompute latest version
     if (versions.empty()) {
         models_.erase(name);
         metadata_.erase(name);
+        fullMeta_.erase(name);
         latestVersions_.erase(name);
     } else {
         std::string newLatest;
@@ -136,19 +162,42 @@ std::vector<ModelFactory::ModelInfo> ModelFactory::listModels() const
             info.name = name;
             info.version = version;
             info.is_latest = (version == getLatestVersion(name));
-            auto metaIt = metadata_.find(name);
-            if (metaIt != metadata_.end()) {
-                auto typeIt = metaIt->second.find(version);
-                if (typeIt != metaIt->second.end()) {
-                    info.type = std::get<0>(typeIt->second);
-                    info.path = std::get<1>(typeIt->second);
-                    info.task = std::get<2>(typeIt->second);
+            auto metaIt = fullMeta_.find(name);
+            if (metaIt != fullMeta_.end()) {
+                auto verMetaIt = metaIt->second.find(version);
+                if (verMetaIt != metaIt->second.end()) {
+                    const auto& m = verMetaIt->second;
+                    info.type = m.type;
+                    info.path = m.path;
+                    info.task = m.task;
+                    info.labels = m.labels;
+                    info.top_k = m.top_k;
+                    info.input_width  = m.input_width;
+                    info.input_height = m.input_height;
+                    info.input_channels = m.input_channels;
+                    info.input_name   = m.input_name;
+                    info.output_name  = m.output_name;
+                    info.input_mean   = m.input_mean;
+                    info.input_std    = m.input_std;
+                    info.confidence_threshold = m.confidence_threshold;
+                    info.nms_threshold = m.nms_threshold;
+                    info.max_detections = m.max_detections;
                 }
             }
             result.push_back(info);
         }
     }
     return result;
+}
+
+const ModelFactory::ModelMeta* ModelFactory::getFullMeta(const std::string& name,
+                                                          const std::string& version) const
+{
+    std::shared_lock lock(mutex_);
+    auto it = fullMeta_.find(name);
+    if (it == fullMeta_.end()) return nullptr;
+    auto vit = it->second.find(version);
+    return vit != it->second.end() ? &vit->second : nullptr;
 }
 
 std::string ModelFactory::getLatestVersion(const std::string& name) const

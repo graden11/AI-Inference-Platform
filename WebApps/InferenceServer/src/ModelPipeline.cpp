@@ -61,6 +61,9 @@ int ModelPipeline::maxBatchSize() const
 
 nlohmann::json ModelPipeline::doPredictJson(const std::vector<uint8_t>& imageBytes)
 {
+    LOG_INFO << "ModelPipeline::doPredictJson task=" << taskTypeToString(config_.task)
+             << " model=" << config_.name << " bytes=" << imageBytes.size();
+
     // 1. Preprocess: image bytes → CHW float tensor
     auto input = preprocessor_->preprocess(imageBytes);
     if (input.empty())
@@ -70,6 +73,7 @@ nlohmann::json ModelPipeline::doPredictJson(const std::vector<uint8_t>& imageByt
         err["message"] = "failed to decode/preprocess image";
         return err;
     }
+    LOG_INFO << "doPredictJson: preprocess done, tensor size=" << input.size();
 
     // 2. Build input shape (batch=1 + spatial dims from config)
     std::vector<int64_t> inputShape = {
@@ -80,10 +84,33 @@ nlohmann::json ModelPipeline::doPredictJson(const std::vector<uint8_t>& imageByt
     };
 
     // 3. Infer: use inferMulti for future multi-output support
-    auto inferOut = backend_->inferMulti(input, inputShape);
+    LOG_INFO << "doPredictJson: calling infer, inputShape=["
+             << inputShape[0] << "," << inputShape[1] << ","
+             << inputShape[2] << "," << inputShape[3] << "]";
+    InferenceOutput inferOut;
+    try {
+        inferOut = backend_->inferMulti(input, inputShape);
+    } catch (const std::exception& e) {
+        LOG_ERROR << "doPredictJson: infer threw exception: " << e.what();
+        nlohmann::json err;
+        err["status"] = "error";
+        err["message"] = std::string("inference error: ") + e.what();
+        return err;
+    } catch (...) {
+        LOG_ERROR << "doPredictJson: infer threw unknown exception";
+        nlohmann::json err;
+        err["status"] = "error";
+        err["message"] = "inference error: unknown exception";
+        return err;
+    }
+    LOG_INFO << "doPredictJson: infer done, output size=" << inferOut.totalElements()
+             << " shape[0]=" << (inferOut.shape.empty() ? -1 : inferOut.shape[0]);
 
     // 4. Postprocess: tensor → JSON
-    return postprocessor_->postprocess(inferOut, labels_);
+    LOG_INFO << "doPredictJson: calling postprocess";
+    auto result = postprocessor_->postprocess(inferOut, labels_);
+    LOG_INFO << "doPredictJson: done, status=" << result.value("status", "?");
+    return result;
 }
 
 nlohmann::json ModelPipeline::predictFromBytesJson(const std::vector<uint8_t>& imageData)
