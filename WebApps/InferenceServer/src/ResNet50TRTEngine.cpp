@@ -185,6 +185,14 @@ bool ResNet50TRTEngine::loadEngine(const std::string &enginePath)
         const char *name = engine_->getIOTensorName(i);
         auto mode = engine_->getTensorIOMode(name);
         auto dims = engine_->getTensorShape(name);
+
+        // Dynamic engine: getTensorShape returns -1 for dynamic dims → use profile MAX
+        if (dims.nbDims > 0 && dims.d[0] == -1)
+        {
+            dims = engine_->getProfileDimensions(i, 0, nvinfer1::OptProfileSelector::kMAX);
+            LOG_INFO << "Dynamic engine detected, using MAX profile dims for tensor: " << name;
+        }
+
         size_t tensorSize = sizeof(float);
         for (int d = 0; d < dims.nbDims; d++)
             tensorSize *= static_cast<size_t>(dims.d[d]);
