@@ -1,8 +1,8 @@
 # Kama-HTTPServer
 
-基于 muduo 的高性能 C++17 HTTP 服务框架，集成 ResNet-50 图像分类推理。支持 ONNX Runtime (CPU) 和 TensorRT (GPU, FP16/INT8)。
+基于 muduo 的高性能 C++17 AI 推理服务平台。支持 ONNX Runtime (CPU) 和 TensorRT (GPU)，多模型热加载，分类/检测/分割多任务类型。
 
-**特性：** 事件驱动架构 · 动态模型加载 · 请求级动态批处理 · Prometheus 指标 · 结构化访问日志 · 优雅关闭 · Redis/内存双模式会话
+**特性：** 事件驱动架构 · 插件式 Backend · 多模型多任务 · 热加载/热卸载 · 请求级动态批处理 · Prometheus 指标 · 结构化访问日志 · 优雅关闭 · Redis/内存双模式会话
 
 ---
 
@@ -26,10 +26,12 @@ git clone <repo-url> && cd httpserver
 
 | 文件 | 大小 | 说明 |
 |------|------|------|
-| `resnet50_classification.onnx` | ~98 MB | ONNX 模型（必选） |
+| `resnet50_classification.onnx` | ~98 MB | ResNet-50 分类（必选） |
+| `yolov8l.onnx` | ~167 MB | YOLOv8l COCO 检测（可选） |
 | `resnet50_classification.engine` | ~50 MB | TensorRT FP16 引擎（GPU 可选） |
 | `resnet50_int8.engine` | ~26 MB | TensorRT INT8 引擎（GPU 可选） |
-| `imagenet_classes.txt` | ~10 KB | ImageNet 1000 类标签（必选） |
+| `imagenet_classes.txt` | ~10 KB | ImageNet 1000 类标签 |
+| `coco_80.txt` | ~0.6 KB | COCO 80 类标签（检测用） |
 
 > 如果模型文件缺失，`start.sh` 会给出清晰提示。无 GPU 时仅需 ONNX 模型。
 
@@ -51,13 +53,17 @@ git clone <repo-url> && cd httpserver
 curl http://localhost/health
 # → {"status":"ok"}
 
-curl -X POST http://localhost/register \
-  -H "Content-Type: application/json" \
-  -d '{"username":"demo","password":"demo"}'
+# 查看已加载模型
+curl http://localhost/models | python3 -m json.tool
 
-curl -X POST http://localhost/predict \
-  -H "Content-Type: application/json" \
-  -d '{"image_path":"/app/models/cat.jpg","model_name":"resnet50"}'
+# 推理测试（分类）
+python3 -c "
+import json,base64
+with open('your_image.jpg','rb') as f:
+    b64 = base64.b64encode(f.read()).decode()
+json.dump({'image_data':b64,'model_name':'resnet50'}, open('/tmp/payload.json','w'))
+"
+curl -s -X POST http://localhost/predict -H 'Content-Type: application/json' -d @/tmp/payload.json | python3 -m json.tool
 ```
 
 ---
@@ -116,6 +122,7 @@ curl -X POST http://localhost/predict \
 | GET | `/backend` | — | 管理后台 |
 | GET | `/backend_data` | — | 在线统计 JSON |
 | POST | `/predict` | — | 图像推理 (JSON) |
+| POST | `/predict/batch` | — | 批量图像推理 |
 | POST | `/predict/proto` | — | 图像推理 (Protobuf) |
 | GET | `/metrics` | — | Prometheus 指标 |
 | GET | `/metrics/json` | — | JSON 指标 |
@@ -129,30 +136,52 @@ curl -X POST http://localhost/predict \
 
 #### 推理 — `POST /predict`
 
-```bash
-# 文件路径方式
-curl -X POST http://localhost/predict \
-  -H "Content-Type: application/json" \
-  -d '{"image_path":"/app/models/cat.jpg","model_name":"resnet50"}'
+支持分类和检测两种任务类型。`model_name` 从 `GET /models` 获取。
 
-# Base64 方式
-curl -X POST http://localhost/predict \
-  -H "Content-Type: application/json" \
-  -d "{\"image_data\":\"$(base64 -w0 cat.jpg)\",\"model_name\":\"resnet50_trt\"}"
+```bash
+# 图片 base64 较大时，先写入文件再发送（避免 bash 参数上限）
+python3 -c "
+import json,base64
+with open('/path/to/image.jpg','rb') as f:
+    b64 = base64.b64encode(f.read()).decode()
+json.dump({'image_data':b64,'model_name':'resnet50'}, open('/tmp/payload.json','w'))
+"
+curl -s -X POST http://localhost/predict \
+  -H 'Content-Type: application/json' \
+  -d @/tmp/payload.json | python3 -m json.tool
 ```
 
-`model_name` 可选：`resnet50` (ONNX)、`resnet50_trt` (TensorRT FP16)、`resnet50_int8` (TensorRT INT8)。
-
-响应 (200):
+**分类响应 (resnet50):**
 ```json
 {
   "status": "ok",
+  "task_type": "classification",
   "predictions": [
     {"id": 282, "label": "tiger cat", "confidence": 27.0},
     {"id": 281, "label": "tabby", "confidence": 12.5}
   ]
 }
 ```
+
+**检测响应 (yolov8l):**
+```json
+{
+  "status": "ok",
+  "task_type": "detection",
+  "detections": [
+    {"class_id": 15, "label": "cat", "confidence": 70.8,
+     "bbox": {"x1": 336, "y1": 240, "x2": 464, "y2": 368}}
+  ]
+}
+```
+
+**参数说明:**
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `image_data` | 二选一 | base64 编码的图片 |
+| `image_path` | 二选一 | 容器内的文件路径（`/app/models/xxx.jpg`） |
+| `model_name` | 否 | 模型名，默认 `resnet50`。可从 `GET /models` 获取 |
 
 #### 监控 — `GET /metrics`
 
@@ -218,9 +247,15 @@ curl -b cookies.txt http://localhost/menu
 ### 2. 注册模型（运行时，无需重启）
 
 ```bash
+# 分类模型（默认)
 curl -b cookies.txt -X POST http://localhost/models/load \
   -H "Content-Type: application/json" \
   -d '{"name":"mobilenet","version":"1","type":"onnx","path":"/app/models/mobilenet.onnx"}'
+
+# 检测模型（需指定 task）
+curl -b cookies.txt -X POST http://localhost/models/load \
+  -H "Content-Type: application/json" \
+  -d '{"name":"yolov8l","version":"1","type":"onnx","path":"/app/models/yolov8l.onnx","task":"detection","labels":"/app/models/coco_80.txt","input_name":"images","output_name":"output0","input_width":640,"input_height":640,"input_mean":[0,0,0],"input_std":[1,1,1],"confidence_threshold":0.3}'
 ```
 
 加载后自动持久化到 `config.json`，重启后自动恢复。

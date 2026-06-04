@@ -76,11 +76,12 @@ nlohmann::json ModelPipeline::doPredictJson(const std::vector<uint8_t>& imageByt
     LOG_INFO << "doPredictJson: preprocess done, tensor size=" << input.size();
 
     // 2. Build input shape (batch=1 + spatial dims from config)
+    bool isHWC = config_.input.layout == "hwc";
     std::vector<int64_t> inputShape = {
         1,
-        config_.input.channels,
-        config_.input.preferred_height,
-        config_.input.preferred_width
+        isHWC ? config_.input.preferred_height : config_.input.channels,
+        isHWC ? config_.input.preferred_width  : config_.input.preferred_height,
+        isHWC ? config_.input.channels         : config_.input.preferred_width
     };
 
     // 3. Infer: use inferMulti for future multi-output support
@@ -163,11 +164,11 @@ std::vector<std::string> ModelPipeline::predictBatch(
     }
 
     // 2. Batch infer
-    std::vector<int64_t> batchShape = {
+    bool isHWC = config_.input.layout == "hwc";    std::vector<int64_t> batchShape = {
         batchSize,
-        config_.input.channels,
-        config_.input.preferred_height,
-        config_.input.preferred_width
+        isHWC ? config_.input.preferred_height : config_.input.channels,
+        isHWC ? config_.input.preferred_width  : config_.input.preferred_height,
+        isHWC ? config_.input.channels         : config_.input.preferred_width
     };
     auto batchIO = backend_->inferBatchMulti(batchInput, batchShape);
 

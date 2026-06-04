@@ -19,8 +19,9 @@ public:
         const std::vector<std::string>& labels) override;
 
 private:
-    bool outputArgmax_;       // true = do argmax on output, false = already class-map
+    bool outputArgmax_;
     int  numClasses_;
+    bool outputHWC_;  // true = output is HWC, false = CHW
 };
 
 } // namespace inference

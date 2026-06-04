@@ -405,9 +405,9 @@ select option {
     </div>
   </section>
 
-  <!-- Predict -->
+  <!-- Inference Demo -->
   <section class="section">
-    <div class="section-title">图像分类推理</div>
+    <div class="section-title">推理演示 <span style="font-size:0.75rem;color:var(--color-text-dim);margin-left:8px">API 联调示例，业务系统请直接调用 REST API</span></div>
     <div class="upload-row">
       <label class="file-label" for="file-input">选择图片</label>
       <input type="file" id="file-input" accept="image/*" multiple>
@@ -416,7 +416,7 @@ select option {
       <button class="btn btn-primary" id="upload-btn" disabled>开始推理</button>
     </div>
     <div id="loading-hint">推理中...</div>
-    <div class="results" id="results"><h3>识别结果</h3></div>
+    <div class="results" id="results"><h3>推理结果</h3></div>
   </section>
 
   <!-- Model Management -->
@@ -650,7 +650,7 @@ function loadModelTable() {
 
 loadModelTable();
 
-/* ===== Predict ===== */
+/* ===== Predict Demo ===== */
 var fileInput = document.getElementById('file-input');
 var fileName  = document.getElementById('file-name');
 var uploadBtn = document.getElementById('upload-btn');
@@ -670,15 +670,12 @@ fileInput.addEventListener('change', function() {
 uploadBtn.addEventListener('click', function() {
   var files = fileInput.files;
   if (files.length === 0) return;
-
   var modelName = document.getElementById('model-select').value;
-
   uploadBtn.disabled = true;
   hint.style.display = 'block';
   results.style.display = 'none';
 
-  var loaded = 0;
-  var images = [];
+  var loaded = 0, images = [];
 
   function submitBatch() {
     fetch('/predict/batch', {
@@ -690,7 +687,7 @@ uploadBtn.addEventListener('click', function() {
     .then(function(data) {
       hint.style.display = 'none';
       uploadBtn.disabled = false;
-      results.innerHTML = '<h3>识别结果 (' + data.count + ' 张)</h3>';
+      results.innerHTML = '<h3>推理结果 (' + data.count + ' 张)</h3>';
       if (data.status === 'ok' && data.results) {
         data.results.forEach(function(r, idx) {
           var name = files[idx] ? files[idx].name : ('图片 ' + (idx + 1));
@@ -704,20 +701,30 @@ uploadBtn.addEventListener('click', function() {
               item.innerHTML = '<span>'+esc(p.label)+'</span><span class="score">'+p.confidence.toFixed(1)+'%</span>';
               card.appendChild(item);
             });
+          } else if (r.detections) {
+            r.detections.forEach(function(d) {
+              var item = document.createElement('div');
+              item.className = 'result-item';
+              var b = d.bbox || {};
+              item.innerHTML = '<span><b>'+esc(d.label)+'</b></span><span class="score">'+d.confidence.toFixed(1)+'%</span>' +
+                '<div style="font-size:0.75rem;color:var(--color-text-dim)">位置: (' +
+                (b.x1||0).toFixed(0)+','+(b.y1||0).toFixed(0)+')→('+(b.x2||0).toFixed(0)+','+(b.y2||0).toFixed(0)+')</div>';
+              card.appendChild(item);
+            });
           } else if (r.status === 'error') {
             card.innerHTML += '<p style="color:var(--color-error);font-size:0.85rem;margin-top:4px">错误: '+esc(r.message||'')+'</p>';
           }
           results.appendChild(card);
         });
       } else {
-        results.innerHTML += '<p style="color:var(--color-error)">识别失败: '+(data.message||'')+'</p>';
+        results.innerHTML += '<p style="color:var(--color-error)">推理失败: '+(data.message||'')+'</p>';
       }
       results.style.display = 'block';
     })
     .catch(function() {
       hint.style.display = 'none';
       uploadBtn.disabled = false;
-      results.innerHTML = '<h3>识别结果</h3><p style="color:var(--color-error)">网络错误</p>';
+      results.innerHTML = '<h3>推理结果</h3><p style="color:var(--color-error)">网络错误</p>';
       results.style.display = 'block';
     });
   }
@@ -728,9 +735,7 @@ uploadBtn.addEventListener('click', function() {
       reader.onload = function() {
         images.push(reader.result.split(',')[1]);
         loaded++;
-        if (loaded === files.length) {
-          submitBatch();
-        }
+        if (loaded === files.length) submitBatch();
       };
       reader.readAsDataURL(file);
     })(files[i]);

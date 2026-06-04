@@ -10,7 +10,8 @@ namespace inference {
 
 SegmentationPostprocessor::SegmentationPostprocessor(const ModelConfig& config)
     : outputArgmax_(config.num_segmentation_classes > 0),
-      numClasses_(config.num_segmentation_classes)
+      numClasses_(config.num_segmentation_classes),
+      outputHWC_(config.output.layout == "hwc")
 {
 }
 
@@ -42,10 +43,17 @@ nlohmann::json SegmentationPostprocessor::postprocess(
 
     if (output.shape.size() >= 4)
     {
-        // {1, C, H, W}
-        realClasses = static_cast<int>(output.shape[1]);
-        maskH = static_cast<int>(output.shape[2]);
-        maskW = static_cast<int>(output.shape[3]);
+        if (outputHWC_) {
+            // {1, H, W, C} (HWC layout)
+            maskH = static_cast<int>(output.shape[1]);
+            maskW = static_cast<int>(output.shape[2]);
+            realClasses = static_cast<int>(output.shape[3]);
+        } else {
+            // {1, C, H, W} (CHW layout)
+            realClasses = static_cast<int>(output.shape[1]);
+            maskH = static_cast<int>(output.shape[2]);
+            maskW = static_cast<int>(output.shape[3]);
+        }
         outputArgmax_ = true;
     }
     else if (output.shape.size() >= 3)
@@ -86,7 +94,8 @@ nlohmann::json SegmentationPostprocessor::postprocess(
                 uint8_t bestClass = 0;
                 for (int c = 0; c < realClasses; ++c)
                 {
-                    float val = raw[c * maskH * maskW + y * maskW + x];
+                    int idx = outputHWC_ ? (y * maskW + x) * realClasses + c : c * maskH * maskW + y * maskW + x;
+                    float val = raw[idx];
                     if (val > maxVal) { maxVal = val; bestClass = static_cast<uint8_t>(c); }
                 }
                 classMap.push_back(bestClass);

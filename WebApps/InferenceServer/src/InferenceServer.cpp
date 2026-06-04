@@ -112,7 +112,7 @@ void InferenceServer::initialize()
                            const std::string& inputName = "input",
                            const std::string& outputName = "output",
                            const std::vector<float>& inputMean = {0.485f, 0.456f, 0.406f},
-                           const std::vector<float>& inputStd = {0.229f, 0.224f, 0.225f}) {
+                           const std::vector<float>& inputStd = {0.229f, 0.224f, 0.225f}, const std::string& layout = "chw") {
 
         if (!inference::BackendRegistry::instance().has(type)) {
             spdlog::warn("Backend '{}' not available, skipping: {}", type, name);
@@ -135,6 +135,7 @@ void InferenceServer::initialize()
         cfg.input.preferred_width  = inputW;
         cfg.input.preferred_height = inputH;
         cfg.input.channels         = inputC;
+        cfg.input.layout = layout;
         cfg.input.mean = inputMean;
         cfg.input.std  = inputStd;
         cfg.output.name = outputName;

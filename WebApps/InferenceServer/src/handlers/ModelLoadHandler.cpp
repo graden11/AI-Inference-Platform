@@ -106,6 +106,8 @@ void ModelLoadHandler::handle(const http::HttpRequest& req, http::HttpResponse* 
         int inputC = body.value("input_channels", 3);
         std::string inputName  = body.value("input_name", "input");
         std::string outputName = body.value("output_name", "output");
+        std::string layout     = body.value("layout", "chw");
+        std::string outLayout  = body.value("output_layout", "chw");
         std::vector<float> inputMean = {0.485f, 0.456f, 0.406f};
         std::vector<float> inputStd  = {0.229f, 0.224f, 0.225f};
 
@@ -148,6 +150,8 @@ void ModelLoadHandler::handle(const http::HttpRequest& req, http::HttpResponse* 
         cfg.input.preferred_width  = inputW;
         cfg.input.preferred_height = inputH;
         cfg.input.channels         = inputC;
+        cfg.input.layout = layout;
+        cfg.output.layout = outLayout;
         cfg.input.mean = inputMean;
         cfg.input.std  = inputStd;
         cfg.output.name = outputName;

@@ -43,6 +43,7 @@ struct InputConfig : TensorIOConfig {
     int preferred_width  = 224;
     int preferred_height = 224;
     int channels         = 3;
+    std::string layout   = "chw";  // "chw" (PyTorch) or "hwc" (TensorFlow/Keras)
     std::vector<float> mean = {0.485f, 0.456f, 0.406f};
     std::vector<float> std  = {0.229f, 0.224f, 0.225f};
 
@@ -51,6 +52,7 @@ struct InputConfig : TensorIOConfig {
 
 /// Output-specific configuration.
 struct OutputConfig : TensorIOConfig {
+    std::string layout = "chw";  // "chw" or "hwc"
 };
 
 /// Complete metadata for one model version.

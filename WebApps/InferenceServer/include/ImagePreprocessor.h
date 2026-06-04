@@ -15,6 +15,7 @@ public:
 
 private:
     int targetW_, targetH_, targetC_;
+    bool hwcLayout_;
     std::vector<float> mean_;
     std::vector<float> std_;
 };
