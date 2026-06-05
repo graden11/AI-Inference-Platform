@@ -15,6 +15,8 @@ public:
     RedisSessionStorage(const std::string& host, int port);
     ~RedisSessionStorage() override;
 
+    bool isAvailable() const { return ctx_ != nullptr; }
+
     void save(std::shared_ptr<Session> session) override;
     std::shared_ptr<Session> load(const std::string& sessionId) override;
     void remove(const std::string& sessionId) override;

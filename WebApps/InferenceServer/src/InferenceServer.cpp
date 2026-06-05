@@ -202,8 +202,16 @@ void InferenceServer::initializeSession()
     if (config_.redis.host.empty()) {
         storage = std::make_unique<http::session::MemorySessionStorage>();
     } else {
-        storage = std::make_unique<http::session::RedisSessionStorage>(
+        auto redisStorage = std::make_unique<http::session::RedisSessionStorage>(
             config_.redis.host, config_.redis.port);
+        if (redisStorage->isAvailable()) {
+            storage = std::move(redisStorage);
+        } else {
+            spdlog::warn("Redis unavailable at {}:{}, falling back to in-memory sessions",
+                         config_.redis.host, config_.redis.port);
+            config_.redis.host.clear();
+            storage = std::make_unique<http::session::MemorySessionStorage>();
+        }
     }
 #else
     storage = std::make_unique<http::session::MemorySessionStorage>();
@@ -231,6 +239,7 @@ void InferenceServer::initializeRouter()
 
     httpServer_.Get("/backend", std::make_shared<GameBackendHandler>(this));
     httpServer_.Get("/backend_data", [this](const http::HttpRequest& req, http::HttpResponse* resp) {
+        if (!ensureAuthenticated(req, resp)) return;
         getBackendData(req, resp);
     });
 
@@ -245,6 +254,8 @@ void InferenceServer::initializeRouter()
     // 动态模型管理
     httpServer_.Get("/models/available", [this](const http::HttpRequest& req, http::HttpResponse* resp) {
         try {
+            if (!ensureAuthenticated(req, resp)) return;
+
             namespace fs = std::filesystem;
             std::string modelDir = fs::path(config_.labels_path).parent_path().string();
 
@@ -303,6 +314,8 @@ void InferenceServer::initializeRouter()
     // 列出 models 目录下所有标签文件
     httpServer_.Get("/models/labels", [this](const http::HttpRequest& req, http::HttpResponse* resp) {
         try {
+            if (!ensureAuthenticated(req, resp)) return;
+
             namespace fs = std::filesystem;
             std::string modelDir = fs::path(config_.labels_path).parent_path().string();
             json files = json::array();
@@ -334,6 +347,8 @@ void InferenceServer::initializeRouter()
     namespace fs = std::filesystem;
     httpServer_.addRoute(http::HttpRequest::kPost, "/models/delete", [this](const http::HttpRequest& req, http::HttpResponse* resp) {
         try {
+            if (!ensureAuthenticated(req, resp)) return;
+
             json reqBody = json::parse(req.getBody());
             std::string filePath = reqBody.value("path", "");
             if (filePath.empty()) {
@@ -345,16 +360,17 @@ void InferenceServer::initializeRouter()
             }
             // 防止路径穿越：只允许删除 models 目录下的文件
             std::string modelDir = fs::path(config_.labels_path).parent_path().string();
-            std::string absPath = fs::absolute(filePath).string();
-            std::string absModelDir = fs::absolute(modelDir).string();
-            if (absPath.find(absModelDir) != 0) {
+            fs::path modelRoot = fs::weakly_canonical(modelDir);
+            fs::path targetPath = fs::weakly_canonical(filePath);
+            fs::path relativeTarget = fs::relative(targetPath, modelRoot);
+            if (relativeTarget.empty() || relativeTarget.begin()->string() == ".." || relativeTarget.is_absolute()) {
                 json err; err["status"]="error"; err["message"]="invalid path";
                 std::string b = err.dump();
                 resp->setStatusLine(req.getVersion(), http::HttpResponse::k400BadRequest, "Bad Request");
                 resp->setContentType("application/json"); resp->setContentLength(b.size()); resp->setBody(b);
                 resp->setCloseConnection(false); return;
             }
-            if (!std::ifstream(filePath).good()) {
+            if (!std::ifstream(targetPath).good()) {
                 json err; err["status"]="error"; err["message"]="file not found: "+filePath;
                 std::string b = err.dump();
                 resp->setStatusLine(req.getVersion(), http::HttpResponse::k404NotFound, "Not Found");
@@ -363,8 +379,7 @@ void InferenceServer::initializeRouter()
             }
             // 检查文件是否正在被加载
             auto loaded = modelFactory_->listModels();
-            std::string cwd = fs::current_path().string();
-            std::string reqPathNorm = fs::weakly_canonical(filePath).string();
+            std::string reqPathNorm = targetPath.string();
             for (auto& m : loaded) {
                 std::string mPathNorm = fs::weakly_canonical(m.path).string();
                 if (reqPathNorm == mPathNorm) {
@@ -375,7 +390,7 @@ void InferenceServer::initializeRouter()
                     resp->setCloseConnection(false); return;
                 }
             }
-            fs::remove(filePath);
+            fs::remove(targetPath);
             json ok; ok["status"]="ok"; ok["message"]="deleted: "+filePath;
             std::string b = ok.dump();
             resp->setStatusLine(req.getVersion(), http::HttpResponse::k200Ok, "OK");
@@ -457,6 +472,25 @@ void InferenceServer::getBackendData(const http::HttpRequest &req, http::HttpRes
         resp->setContentLength(errorStr.size());
         resp->setCloseConnection(true);
     }
+}
+
+bool InferenceServer::ensureAuthenticated(const http::HttpRequest& req, http::HttpResponse* resp) const
+{
+    auto* manager = getSessionManager();
+    auto session = manager ? manager->getSession(req, resp) : nullptr;
+    if (session && session->getValue("isLoggedIn") == "true")
+        return true;
+
+    json err;
+    err["status"] = "error";
+    err["message"] = "Unauthorized";
+    std::string body = err.dump();
+    resp->setStatusLine(req.getVersion(), http::HttpResponse::k401Unauthorized, "Unauthorized");
+    resp->setContentType("application/json");
+    resp->setContentLength(body.size());
+    resp->setBody(body);
+    resp->setCloseConnection(true);
+    return false;
 }
 
 void InferenceServer::cleanupStaleSessions()

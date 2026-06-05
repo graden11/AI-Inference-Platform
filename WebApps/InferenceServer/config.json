@@ -217,7 +217,7 @@
     "user": "root"
   },
   "redis": {
-    "host": "",
+    "host": "redis",
     "pool_size": 5,
     "port": 6379
   },

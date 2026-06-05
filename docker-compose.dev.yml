@@ -44,6 +44,11 @@ services:
       - "1234:1234"
     volumes:
       - .:/project
+    environment:
+      MYSQL_USER: root
+      MYSQL_PASSWORD: root
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
     depends_on:
       mysql:
         condition: service_healthy

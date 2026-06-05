@@ -12,10 +12,15 @@ build/*
 
 # Claude Code
 .claude/
+.agents/
 
 # Docs and temp files
 *.md
 cat.jpg
+
+# Local environment and editor state
+.env
+.env.*
 
 # Scripts
 scripts/

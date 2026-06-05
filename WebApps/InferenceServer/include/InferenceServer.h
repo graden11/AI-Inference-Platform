@@ -79,6 +79,7 @@ private:
 
     const std::string& getLabelsPath() const { return config_.labels_path; }
     void saveConfig() const;
+    bool ensureAuthenticated(const http::HttpRequest& req, http::HttpResponse* resp) const;
 
     // 清理已过期的在线用户记录
     void cleanupStaleSessions();
