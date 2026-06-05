@@ -22,7 +22,7 @@ git clone <repo-url> && cd httpserver
 
 ### 2. 放置模型文件
 
-模型文件 **不在 Git 仓库中**（总计 ~174 MB），需放入 `WebApps/InferenceServer/models/`：
+模型文件 **不在 Git 仓库中**（总计 ~174 MB），需放入 `models/`：
 
 | 文件 | 大小 | 说明 |
 |------|------|------|
@@ -79,7 +79,7 @@ curl -s -X POST http://localhost/predict -H 'Content-Type: application/json' -d 
 |  +------------------+  +------------------+  +-----------+ |
 |  | MetricsMiddleware|  |  CorsMiddleware  |  | Session   | |
 |  +------------------+  +------------------+  +-----------+ |
-|  |                   Router (16 条路由)                   | |
+|  |                   Router (23 条路由)                   | |
 |  +------------------------------------------------------+ |
 +----------------------------------------------------------+
         │                               │
@@ -90,7 +90,7 @@ curl -s -X POST http://localhost/predict -H 'Content-Type: application/json' -d 
 | - ResNet50TRTEngine  |    | - MiddlewareChain        |
 | - ModelFactory       |    | - SessionManager         |
 | - RequestBatcher     |    | - DbConnectionPool       |
-| - 14 个 Handler      |    | - MetricsCollector       |
+| - 17 个 Handler      |    | - MetricsCollector       |
 +----------+-----------+    +--------------------------+
            │
            v
@@ -108,7 +108,7 @@ curl -s -X POST http://localhost/predict -H 'Content-Type: application/json' -d 
 
 ## API 参考
 
-**Base URL:** `http://localhost` · **认证:** 登录后携带 `Cookie: SESSIONID=<uuid>`
+**Base URL:** `http://localhost` · **认证:** 登录后携带 `Cookie: sessionId=<uuid>`
 
 ### 端点总览
 
@@ -119,11 +119,16 @@ curl -s -X POST http://localhost/predict -H 'Content-Type: application/json' -d 
 | POST | `/register` | — | 用户注册 |
 | POST | `/user/logout` | 是 | 用户登出 |
 | GET | `/menu` | 是 | AI 推理仪表盘 |
-| GET | `/backend` | — | 管理后台 |
-| GET | `/backend_data` | — | 在线统计 JSON |
+| GET | `/backend` | 是 | 管理后台 |
+| GET | `/backend_data` | 是 | 在线统计 JSON |
 | POST | `/predict` | — | 图像推理 (JSON) |
 | POST | `/predict/batch` | — | 批量图像推理 |
 | POST | `/predict/proto` | — | 图像推理 (Protobuf) |
+| POST | `/models/delete` | 是 | 删除模型文件 |
+| GET | `/models/available` | 是 | 列出 models 目录文件 |
+| GET | `/models/labels` | 是 | 列出标签文件 |
+| POST | `/models/convert` | 是 | ONNX → TensorRT 转换 (GPU only) |
+| GET | `/models/convert/status` | 是 | 查看转换进度 |
 | GET | `/metrics` | — | Prometheus 指标 |
 | GET | `/metrics/json` | — | JSON 指标 |
 | GET | `/health` | — | 存活检查 |
@@ -217,6 +222,11 @@ curl -b cookies.txt -X POST http://localhost/models/load \
 
 # 卸载模型（需登录）
 curl -b cookies.txt -X DELETE http://localhost/models/resnet50/v2
+
+# 删除模型文件（需登录）
+curl -b cookies.txt -X POST http://localhost/models/delete \
+  -H "Content-Type: application/json" \
+  -d '{"path":"/app/models/old_model.onnx"}'
 ```
 
 #### 用户认证
@@ -242,7 +252,7 @@ curl -b cookies.txt http://localhost/menu
 
 ### 1. 准备模型文件
 
-将 ONNX 模型文件放入 `WebApps/InferenceServer/models/`。
+将 ONNX 模型文件放入 `models/`。
 
 ### 2. 注册模型（运行时，无需重启）
 
@@ -298,6 +308,20 @@ curl -X POST http://localhost/predict \
   "batching": { "enabled": false, "max_batch_size": 8, "max_delay_ms": 10 }
 }
 ```
+
+### 环境变量
+
+部署时通过 Compose 环境变量覆盖配置（见 [.env.example](.env.example)）：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `MYSQL_ROOT_PASSWORD` | `root` | MySQL root 密码（首次 init） |
+| `MYSQL_USER` | `root` | 应用连接 MySQL 的用户 |
+| `MYSQL_PASSWORD` | `root` | 应用连接 MySQL 的密码 |
+| `REDIS_HOST` | `redis` | Redis 主机名 |
+| `REDIS_PORT` | `6379` | Redis 端口 |
+
+> Redis `host: ""`（空字符串）时，服务自动降级为**内存 Session**（无需 Redis 容器），方便本地裸跑调试。生产环境推荐启用 Redis。`docker-entrypoint.sh` 会将环境变量注入 `config.json`。
 
 ### 命令行参数
 
@@ -379,11 +403,13 @@ curl http://localhost/metrics          # Prometheus 指标
 ### 快速开始
 
 ```bash
-# 使用开发容器
-docker build -f Dockerfile.dev -t kama-httpserver:dev .
-docker run -it --gpus all -v "$(pwd):/project" -p 80:80 kama-httpserver:dev
-# 容器内：cmake .. && make -j$(nproc) && ./simple_server -c ../WebApps/InferenceServer/config.json
+# 使用开发 Compose（源码挂载，重启即重编译）
+docker compose -f docker-compose.dev.yml up -d --build
+# C++ 改动后无需重建镜像：
+docker compose -f docker-compose.dev.yml restart
 ```
+
+开发容器启动时自动 `cmake .. && make -j$(nproc)`，之后只需 `restart` 就能生效改动。源码全量挂载到容器内 `/project`。
 
 ### 文档索引
 
