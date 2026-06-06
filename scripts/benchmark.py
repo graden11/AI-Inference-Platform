@@ -32,7 +32,8 @@ def pick_model(models: list) -> str:
     return "resnet50"
 
 def run_predict(model: str, image_path: str = "images/cat.jpg") -> tuple:
-    """Send one POST /predict request. Returns (latency_us, success, status_code)."""
+    """Send one POST /predict request. Uses image_path if file exists, else falls back
+    to a pre-encoded base64 image for models/ and images/ directories."""
     payload = json.dumps({"model_name": model, "image_path": image_path}).encode()
     req = urllib.request.Request(f"{BASE_URL}/predict", data=payload,
                                  headers={"Content-Type": "application/json"})
@@ -40,7 +41,36 @@ def run_predict(model: str, image_path: str = "images/cat.jpg") -> tuple:
     try:
         resp = urllib.request.urlopen(req, timeout=30)
         body = resp.read()
-        elapsed = (time.perf_counter() - t0) * 1_000_000  # microseconds
+        elapsed = (time.perf_counter() - t0) * 1_000_000
+        data = json.loads(body) if body else {}
+        ok = data.get("status") == "ok"
+        if not ok and ("failed to load image" in data.get("message", "")):
+            # Fall back to base64 mode
+            return run_predict_base64(model, image_path)
+        return elapsed, ok, resp.status
+    except urllib.error.HTTPError as e:
+        elapsed = (time.perf_counter() - t0) * 1_000_000
+        return elapsed, False, e.code
+    except Exception as e:
+        elapsed = (time.perf_counter() - t0) * 1_000_000
+        return elapsed, False, 0
+
+
+def run_predict_base64(model: str, image_path: str = "images/cat.jpg") -> tuple:
+    """Fallback: encode image from filesystem and send as image_data."""
+    try:
+        with open(image_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
+    except Exception:
+        return 0, False, 0
+    payload = json.dumps({"model_name": model, "image_data": b64}).encode()
+    req = urllib.request.Request(f"{BASE_URL}/predict", data=payload,
+                                 headers={"Content-Type": "application/json"})
+    t0 = time.perf_counter()
+    try:
+        resp = urllib.request.urlopen(req, timeout=30)
+        body = resp.read()
+        elapsed = (time.perf_counter() - t0) * 1_000_000
         data = json.loads(body) if body else {}
         return elapsed, data.get("status") == "ok", resp.status
     except urllib.error.HTTPError as e:
