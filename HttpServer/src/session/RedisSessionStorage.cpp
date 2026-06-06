@@ -1,5 +1,6 @@
 #include "../include/session/RedisSessionStorage.h"
 #include <muduo/base/Logging.h>
+#include <nlohmann/json.hpp>
 #include <hiredis/hiredis.h>
 
 namespace http {
@@ -52,74 +53,36 @@ void RedisSessionStorage::reconnect()
     }
 }
 
-static std::string jsonEscape(const std::string& s)
-{
-    std::string out;
-    out.reserve(s.size() + 2);
-    for (char c : s) {
-        if (c == '"' || c == '\\') out += '\\';
-        out += c;
-    }
-    return out;
-}
-
-static std::string jsonUnescape(const std::string& s) { return s; }
-
 std::string RedisSessionStorage::serialize(const Session& session) const
 {
-    std::string json = "{\"id\":\"" + jsonEscape(session.getId()) + "\",\"maxAge\":3600,\"data\":{";
-    bool first = true;
-    for (const auto& [k, v] : session.getData()) {
-        if (!first) json += ",";
-        first = false;
-        json += "\"" + jsonEscape(k) + "\":\"" + jsonEscape(v) + "\"";
-    }
-    json += "}}";
-    return json;
+    nlohmann::json j;
+    j["id"] = session.getId();
+    j["maxAge"] = 3600;
+    nlohmann::json data = nlohmann::json::object();
+    for (const auto& [k, v] : session.getData())
+        data[k] = v;
+    j["data"] = data;
+    return j.dump();
 }
 
-std::shared_ptr<Session> RedisSessionStorage::deserialize(const std::string& json) const
+std::shared_ptr<Session> RedisSessionStorage::deserialize(const std::string& jsonStr) const
 {
-    // Minimal JSON parser for our simple format: {"id":"...","maxAge":N,"data":{"k":"v",...}}
-    auto extractString = [&json](const std::string& key) -> std::string {
-        size_t pos = json.find("\"" + key + "\":\"");
-        if (pos == std::string::npos) return "";
-        pos += key.length() + 4;
-        size_t end = json.find("\"", pos);
-        if (end == std::string::npos) return "";
-        return json.substr(pos, end - pos);
-    };
-
-    std::string id = extractString("id");
-    if (id.empty()) return nullptr;
-
-    auto session = std::make_shared<Session>(id, nullptr, 3600);
-
-    // Parse data sub-object
-    size_t dataPos = json.find("\"data\":{");
-    if (dataPos == std::string::npos) return session;
-    dataPos += 8; // skip "data":{
-    size_t dataEnd = json.find("}}", dataPos);
-    if (dataEnd == std::string::npos) return session;
-    std::string dataStr = json.substr(dataPos, dataEnd - dataPos);
-
-    // Parse "key":"value" pairs
-    size_t p = 0;
-    while (p < dataStr.size()) {
-        if (dataStr[p] != '"') break;
-        size_t keyEnd = dataStr.find("\":\"", p + 1);
-        if (keyEnd == std::string::npos) break;
-        std::string k = dataStr.substr(p + 1, keyEnd - p - 1);
-        size_t valStart = keyEnd + 3;
-        size_t valEnd = dataStr.find("\"", valStart);
-        if (valEnd == std::string::npos) break;
-        std::string v = dataStr.substr(valStart, valEnd - valStart);
-        session->setValue(k, v);
-        p = valEnd + 1;
-        if (p < dataStr.size() && dataStr[p] == ',') p++;
+    try {
+        nlohmann::json j = nlohmann::json::parse(jsonStr);
+        std::string id = j.value("id", "");
+        if (id.empty()) return nullptr;
+        auto session = std::make_shared<Session>(id, nullptr, j.value("maxAge", 3600));
+        if (j.contains("data") && j["data"].is_object()) {
+            for (const auto& [k, v] : j["data"].items()) {
+                if (v.is_string())
+                    session->setValue(k, v.get<std::string>());
+            }
+        }
+        return session;
+    } catch (const nlohmann::json::exception& e) {
+        LOG_ERROR << "Redis session deserialize failed: " << e.what();
+        return nullptr;
     }
-
-    return session;
 }
 
 void RedisSessionStorage::save(std::shared_ptr<Session> session)

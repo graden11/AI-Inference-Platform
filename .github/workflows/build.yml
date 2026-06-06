@@ -1,0 +1,26 @@
+name: Build Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-cpu:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ make libssl-dev \
+            libmysqlclient-dev libmysqlcppconn-dev \
+            nlohmann-json3-dev protobuf-compiler libprotobuf-dev \
+            libspdlog-dev libhiredis-dev
+      - name: Configure (CPU only)
+        run: mkdir build && cd build && cmake .. -DENABLE_TENSORRT=OFF
+      - name: Build
+        run: cd build && make -j$(nproc)
+      - name: Verify binary
+        run: file build/simple_server && build/simple_server --help 2>&1 || true
