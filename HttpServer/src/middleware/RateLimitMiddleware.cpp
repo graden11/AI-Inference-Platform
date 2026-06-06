@@ -25,21 +25,20 @@ bool RateLimitMiddleware::allow(const std::string& ip)
         bucket.tokens = static_cast<double>(burst_);
         bucket.lastFill = now;
     } else {
-        // Refill tokens based on elapsed time
-        double elapsed =
-            std::chrono::duration<double>(now - bucket.lastFill).count();
+        double elapsed = std::chrono::duration<double>(now - bucket.lastFill).count();
         bucket.tokens = std::min(static_cast<double>(burst_),
                                  bucket.tokens + elapsed * rate_);
         bucket.lastFill = now;
     }
 
+    bool allowed = false;
     if (bucket.tokens >= 1.0) {
         bucket.tokens -= 1.0;
-        return true;
+        allowed = true;
     }
-    return false;
 
     maybeCleanup();
+    return allowed;
 }
 
 void RateLimitMiddleware::maybeCleanup()

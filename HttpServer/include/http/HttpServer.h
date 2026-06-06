@@ -24,6 +24,7 @@
 #include "../session/SessionManager.h"
 #include "../middleware/MiddlewareChain.h"
 #include "../middleware/cors/CorsMiddleware.h"
+#include "../middleware/RateLimitMiddleware.h"
 #include "../ssl/SslConnection.h"
 #include "../ssl/SslContext.h"
 
@@ -118,9 +119,20 @@ public:
     }
 
     // 添加中间件的方法
-    void addMiddleware(std::shared_ptr<middleware::Middleware> middleware) 
+    void addMiddleware(std::shared_ptr<middleware::Middleware> middleware)
     {
         middlewareChain_.addMiddleware(middleware);
+    }
+
+    // Enable per-IP rate limiting. 0 = disabled (default).
+    void enableRateLimit(int requestsPerSec = 100, int burst = 200)
+    {
+        rateLimiter_ = std::make_shared<middleware::RateLimitMiddleware>(requestsPerSec, burst);
+    }
+
+    std::shared_ptr<middleware::RateLimitMiddleware> getRateLimiter() const
+    {
+        return rateLimiter_;
     }
 
     void enableSSL(bool enable) 
@@ -150,7 +162,8 @@ private:
     std::unique_ptr<session::SessionManager>     sessionManager_; // 会话管理器
     middleware::MiddlewareChain                  middlewareChain_; // 中间件链
     std::unique_ptr<ssl::SslContext>             sslCtx_; // SSL 上下文
-    bool                                         useSSL_; // 是否使用 SSL   
+    bool                                         useSSL_; // 是否使用 SSL
+    std::shared_ptr<middleware::RateLimitMiddleware> rateLimiter_;
     // TcpConnectionPtr -> SslConnectionPtr
     std::map<muduo::net::TcpConnectionPtr, std::unique_ptr<ssl::SslConnection>> sslConns_;
     mutable std::mutex sslConnsMutex_;

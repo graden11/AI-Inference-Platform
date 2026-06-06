@@ -197,6 +197,21 @@ void HttpServer::onMessage(const muduo::net::TcpConnectionPtr &conn,
 
 void HttpServer::onRequest(const muduo::net::TcpConnectionPtr &conn, const HttpRequest &req)
 {
+    // Rate limit check — reject early before allocating response resources
+    if (rateLimiter_)
+    {
+        std::string ip = conn->peerAddress().toIp();
+        if (!rateLimiter_->allow(ip))
+        {
+            conn->send("HTTP/1.1 429 Too Many Requests\r\n"
+                       "Content-Type: application/json\r\n"
+                       "Content-Length: 42\r\n\r\n"
+                       "{\"status\":\"error\",\"message\":\"rate limited\"}");
+            conn->shutdown();
+            return;
+        }
+    }
+
     inflightCount_.fetch_add(1);
     try
     {

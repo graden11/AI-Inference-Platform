@@ -226,6 +226,10 @@ void InferenceServer::initializeMiddleware()
     auto metricsMiddleware = std::make_shared<http::middleware::MetricsMiddleware>();
     httpServer_.addMiddleware(metricsMiddleware);
     httpServer_.addMiddleware(corsMiddleware);
+
+    // Per-IP rate limiting: 100 req/s, 200 burst
+    httpServer_.enableRateLimit(100, 200);
+    spdlog::info("Rate limiter enabled: 100 req/s per IP, burst 200");
 }
 
 void InferenceServer::initializeRouter()
