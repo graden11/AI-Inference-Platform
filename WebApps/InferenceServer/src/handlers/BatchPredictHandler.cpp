@@ -6,40 +6,16 @@
 
 #include "../../../../HttpServer/include/utils/JsonUtil.h"
 #include "../../../../HttpServer/include/utils/PathValidator.h"
+#include "../../../../HttpServer/include/utils/Base64.h"
 
 #include <fstream>
+#include <utility>
 #include <vector>
 
 namespace
 {
 
 const std::vector<std::string> kAllowedReadDirs = {"models", "images"};
-
-std::vector<uint8_t> base64Decode(const std::string &encoded)
-{
-    static const std::string kChars =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-    std::vector<int> decode(256, -1);
-    for (int i = 0; i < 64; ++i)
-        decode[static_cast<unsigned char>(kChars[i])] = i;
-
-    std::vector<uint8_t> result;
-    int val = 0, valb = -8;
-    for (unsigned char c : encoded)
-    {
-        if (decode[c] == -1)
-            break;
-        val = (val << 6) + decode[c];
-        valb += 6;
-        if (valb >= 0)
-        {
-            result.push_back(static_cast<uint8_t>((val >> valb) & 0xFF));
-            valb -= 8;
-        }
-    }
-    return result;
-}
 
 std::vector<uint8_t> readFile(const std::string &path)
 {
@@ -65,7 +41,7 @@ void sendError(const http::HttpRequest &req, http::HttpResponse *resp,
         code == http::HttpResponse::k400BadRequest ? "Bad Request" : "Internal Server Error");
     resp->setContentType("application/json");
     resp->setContentLength(body.size());
-    resp->setBody(body);
+    resp->setBody(std::move(body));
     resp->setCloseConnection(false);
 }
 
@@ -115,10 +91,11 @@ void BatchPredictHandler::handle(const http::HttpRequest &req, http::HttpRespons
                           "'image_paths' must be a non-empty array");
                 return;
             }
+            imageBytes.reserve(paths.size());
 
             for (auto &p : paths)
             {
-                std::string pathStr = p.get<std::string>();
+                const auto& pathStr = p.get_ref<const std::string&>();
                 if (!http::utils::isPathSafeInDirs(pathStr, kAllowedReadDirs))
                 {
                     sendError(req, resp, http::HttpResponse::k400BadRequest,
@@ -144,10 +121,12 @@ void BatchPredictHandler::handle(const http::HttpRequest &req, http::HttpRespons
                           "'images' must be a non-empty array");
                 return;
             }
+            imageBytes.reserve(images.size());
 
             for (auto &img : images)
             {
-                auto data = base64Decode(img.get<std::string>());
+                const auto& b64 = img.get_ref<const std::string&>();
+                auto data = http::utils::base64Decode(b64);
                 if (data.empty())
                 {
                     sendError(req, resp, http::HttpResponse::k400BadRequest,
@@ -194,7 +173,7 @@ void BatchPredictHandler::handle(const http::HttpRequest &req, http::HttpRespons
         resp->setStatusLine(req.getVersion(), http::HttpResponse::k200Ok, "OK");
         resp->setContentType("application/json");
         resp->setContentLength(respBody.size());
-        resp->setBody(respBody);
+        resp->setBody(std::move(respBody));
         resp->setCloseConnection(false);
     }
     catch (const json::exception &e)

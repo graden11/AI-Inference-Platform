@@ -4,42 +4,18 @@
 #include "../../include/RequestBatcher.h"
 
 #include "../../../../HttpServer/include/utils/PathValidator.h"
+#include "../../../../HttpServer/include/utils/Base64.h"
 
 #include <muduo/base/Logging.h>
 
 #include <fstream>
+#include <utility>
 #include <vector>
 
 namespace
 {
 
 const std::vector<std::string> kAllowedReadDirs = {"models", "images"};
-
-std::vector<uint8_t> base64Decode(const std::string &encoded)
-{
-    static const std::string kChars =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-    std::vector<int> decode(256, -1);
-    for (int i = 0; i < 64; ++i)
-        decode[static_cast<unsigned char>(kChars[i])] = i;
-
-    std::vector<uint8_t> result;
-    int val = 0, valb = -8;
-    for (unsigned char c : encoded)
-    {
-        if (decode[c] == -1)
-            break;
-        val = (val << 6) + decode[c];
-        valb += 6;
-        if (valb >= 0)
-        {
-            result.push_back(static_cast<uint8_t>((val >> valb) & 0xFF));
-            valb -= 8;
-        }
-    }
-    return result;
-}
 
 std::vector<uint8_t> readFile(const std::string &path)
 {
@@ -95,7 +71,7 @@ void PredictHandler::handle(const http::HttpRequest &req, http::HttpResponse *re
             std::vector<uint8_t> imageBytes;
             if (hasPath)
             {
-                std::string imagePath = body["image_path"];
+                const auto& imagePath = body["image_path"].get_ref<const std::string&>();
                 if (!http::utils::isPathSafeInDirs(imagePath, kAllowedReadDirs))
                 {
                     sendPredictError(req, resp, http::HttpResponse::k400BadRequest,
@@ -112,7 +88,14 @@ void PredictHandler::handle(const http::HttpRequest &req, http::HttpResponse *re
             }
             else
             {
-                imageBytes = base64Decode(body["image_data"]);
+                const auto& b64 = body["image_data"].get_ref<const std::string&>();
+                imageBytes = http::utils::base64Decode(b64);
+                if (imageBytes.empty())
+                {
+                    sendPredictError(req, resp, http::HttpResponse::k400BadRequest,
+                                     "failed to decode base64 image");
+                    return;
+                }
             }
 
             auto future = batcher_->submit(modelName, std::move(imageBytes));
@@ -138,7 +121,7 @@ void PredictHandler::handle(const http::HttpRequest &req, http::HttpResponse *re
         std::string resultJson;
         if (hasPath)
         {
-            std::string imagePath = body["image_path"];
+            const auto& imagePath = body["image_path"].get_ref<const std::string&>();
             if (!http::utils::isPathSafeInDirs(imagePath, kAllowedReadDirs))
             {
                 sendPredictError(req, resp, http::HttpResponse::k400BadRequest,
@@ -149,8 +132,14 @@ void PredictHandler::handle(const http::HttpRequest &req, http::HttpResponse *re
         }
         else
         {
-            std::string b64 = body["image_data"];
-            auto imageBytes = base64Decode(b64);
+            const auto& b64 = body["image_data"].get_ref<const std::string&>();
+            auto imageBytes = http::utils::base64Decode(b64);
+            if (imageBytes.empty())
+            {
+                sendPredictError(req, resp, http::HttpResponse::k400BadRequest,
+                                 "failed to decode base64 image");
+                return;
+            }
             resultJson = engine->predictFromBytes(imageBytes);
         }
 

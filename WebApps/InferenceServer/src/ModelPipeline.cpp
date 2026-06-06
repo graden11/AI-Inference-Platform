@@ -153,8 +153,9 @@ std::vector<std::string> ModelPipeline::predictBatch(
 
     // 1. Preprocess all images, concatenate into one NCHW tensor
     int perSampleElems = config_.input.elemCount();
-    batchInput_.clear();
-    batchInput_.reserve(batchSize * perSampleElems);
+    thread_local std::vector<float> batchInput;
+    batchInput.clear();
+    batchInput.reserve(batchSize * perSampleElems);
 
     for (auto& img : images)
     {
@@ -162,11 +163,11 @@ std::vector<std::string> ModelPipeline::predictBatch(
         if (input.empty())
         {
             LOG_ERROR << "predictBatch: failed to decode image, zero-filling";
-            batchInput_.insert(batchInput_.end(), perSampleElems, 0.0f);
+            batchInput.insert(batchInput.end(), perSampleElems, 0.0f);
         }
         else
         {
-            batchInput_.insert(batchInput_.end(), input.begin(), input.end());
+            batchInput.insert(batchInput.end(), input.begin(), input.end());
         }
     }
 
@@ -177,7 +178,7 @@ std::vector<std::string> ModelPipeline::predictBatch(
         isHWC ? config_.input.preferred_width  : config_.input.preferred_height,
         isHWC ? config_.input.channels         : config_.input.preferred_width
     };
-    auto batchIO = backend_->inferBatchMulti(batchInput_, batchShape);
+    auto batchIO = backend_->inferBatchMulti(batchInput, batchShape);
 
     // 3. Postprocess — delegate to per-task postprocessBatch
     auto resultsJson = postprocessor_->postprocessBatch(batchIO, batchSize, labels_);

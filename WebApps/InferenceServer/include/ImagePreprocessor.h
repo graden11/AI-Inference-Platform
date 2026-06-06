@@ -18,6 +18,8 @@ private:
     bool hwcLayout_;
     std::vector<float> mean_;
     std::vector<float> std_;
+    std::vector<float> scale_;
+    std::vector<float> bias_;
 };
 
 } // namespace inference
