@@ -49,6 +49,7 @@ private:
     std::unique_ptr<InferenceBackend> backend_;
     std::unique_ptr<Postprocessor> postprocessor_;
     std::vector<std::string> labels_;
+    std::vector<float> batchInput_;  // reusable batch concatenation buffer
 };
 
 } // namespace inference

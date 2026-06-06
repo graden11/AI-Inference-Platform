@@ -32,34 +32,41 @@ std::vector<float> ImagePreprocessor::preprocess(const std::vector<uint8_t>& ima
         return {};
     }
 
-    // Resize to target dimensions using bilinear interpolation
-    std::vector<uint8_t> resized(targetH_ * targetW_ * targetC_);
-    stbir_resize_uint8_srgb(data, w, h, 0,
-                            resized.data(), targetW_, targetH_, 0,
-                            static_cast<stbir_pixel_layout>(targetC_));
-    stbi_image_free(data);
-
-    // Normalize, standardize
     int elemCount = targetC_ * targetH_ * targetW_;
     std::vector<float> input(elemCount);
 
+    // One-pass float resize: stbi decodes uint8; resize directly into float tensor.
+    // STBIR_TYPE_UINT8: no sRGB decoding, raw uint8→float conversion in stbir.
+    // Output is float values in [0,255] range — normalize with /255.0f below.
+    // Eliminates the intermediate uint8 resized buffer (~150 KB savings).
+    stbir_resize(data, w, h, 0,
+                 input.data(), targetW_, targetH_, 0,
+                 static_cast<stbir_pixel_layout>(targetC_),
+                 STBIR_TYPE_UINT8,
+                 STBIR_EDGE_CLAMP, STBIR_FILTER_DEFAULT);
+    stbi_image_free(data);
+
+    // Normalize + transpose. stbir output is float [0,255] — divide by 255.
     if (hwcLayout_) {
-        for (int y = 0; y < targetH_; ++y)
-            for (int x = 0; x < targetW_; ++x)
-                for (int c = 0; c < targetC_; ++c) {
-                    int idx = (y * targetW_ + x) * targetC_ + c;
-                    float val = resized[idx] / 255.0f;
-                    input[idx] = (val - mean_[c]) / std_[c];
-                }
+        for (int i = 0; i < elemCount; ++i) {
+            int c = i % targetC_;
+            input[i] = (input[i] / 255.0f - mean_[c]) / std_[c];
+        }
     } else {
-        for (int c = 0; c < targetC_; ++c)
-            for (int y = 0; y < targetH_; ++y)
-                for (int x = 0; x < targetW_; ++x) {
-                    int hwcIdx = (y * targetW_ + x) * targetC_ + c;
+        // HWC source → CHW target: fused transpose + normalize.
+        // Loop order y→x→c for cache-friendly sequential HWC reads.
+        std::vector<float> transposed(elemCount);
+        for (int y = 0; y < targetH_; ++y) {
+            for (int x = 0; x < targetW_; ++x) {
+                int hwcBase = (y * targetW_ + x) * targetC_;
+                for (int c = 0; c < targetC_; ++c) {
                     int chwIdx = (c * targetH_ + y) * targetW_ + x;
-                    float val = resized[hwcIdx] / 255.0f;
-                    input[chwIdx] = (val - mean_[c]) / std_[c];
+                    float val = input[hwcBase + c] / 255.0f;
+                    transposed[chwIdx] = (val - mean_[c]) / std_[c];
                 }
+            }
+        }
+        return transposed;
     }
 
     return input;
