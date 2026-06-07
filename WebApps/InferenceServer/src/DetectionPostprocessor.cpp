@@ -51,7 +51,7 @@ nlohmann::json DetectionPostprocessor::postprocess(
     // PyTorch layout: field-major (first 8400 = all anchors' field[0], etc.)
     // 8400 anchors: scale 0 80x80(stride=8), scale 1 40x40(stride=16), scale 2 20x20(stride=32)
 
-    const float* raw = output.data.data();
+    const float* raw = output.dataPtrOrCopy();
     size_t total = output.totalElements();
 
     if (total == 0) {

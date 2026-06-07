@@ -16,7 +16,7 @@ nlohmann::json ClassificationPostprocessor::postprocess(
     const InferenceOutput& output,
     const std::vector<std::string>& labels)
 {
-    return postprocessSample(output.data.data(), output.totalElements(), labels);
+    return postprocessSample(output.dataPtrOrCopy(), output.totalElements(), labels);
 }
 
 nlohmann::json ClassificationPostprocessor::postprocessSample(

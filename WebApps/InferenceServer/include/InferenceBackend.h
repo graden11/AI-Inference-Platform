@@ -15,6 +15,7 @@ namespace inference {
 /// classification models produce one (logits).
 struct InferenceOutput {
     /// Flattened data from ALL output tensors concatenated together.
+    /// May be empty when backendHandle is set (zero-copy path).
     std::vector<float> data;
 
     /// Shape of the concatenated output (batch dim first, e.g. {1, N}).
@@ -29,11 +30,24 @@ struct InferenceOutput {
     /// Output tensor names from the backend.
     std::vector<std::string> names;
 
+    /// --- Zero-copy support ---
+    /// Opaque handle that keeps backend-owned output memory alive.
+    /// When set, data may be empty — use dataPtr() / totalElements() instead.
+    std::shared_ptr<void> backendHandle;
+
+    /// Pointer into backend-owned output memory (valid while backendHandle lives).
+    /// Only set on the zero-copy path.
+    const float* dataPtr = nullptr;
+    size_t dataSize = 0;
+
     /// True when multi-output was used (vs. single tensor).
     bool isMultiOutput() const { return !tensors.empty(); }
 
+    /// Data pointer: backend-owned if zero-copy, otherwise .data.data().
+    const float* dataPtrOrCopy() const { return dataPtr ? dataPtr : data.data(); }
+
     /// Convenience: total element count including batch dim.
-    size_t totalElements() const { return data.size(); }
+    size_t totalElements() const { return dataPtr ? dataSize : data.size(); }
 };
 
 /// Pure tensor-in, tensor-out backend.  No image knowledge, no labels.

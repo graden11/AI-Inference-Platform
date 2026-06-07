@@ -30,11 +30,11 @@ std::vector<nlohmann::json> Postprocessor::postprocessBatch(
 
     size_t perSampleOut = batchOutput.shape.size() >= 2
         ? static_cast<size_t>(batchOutput.shape[1])
-        : batchOutput.data.size() / batchSize;
+        : batchOutput.totalElements() / batchSize;
 
     for (int i = 0; i < batchSize; ++i)
     {
-        const float* sample = batchOutput.data.data() + i * perSampleOut;
+        const float* sample = batchOutput.dataPtrOrCopy() + i * perSampleOut;
         results.push_back(postprocessSample(sample, perSampleOut, labels));
     }
     return results;

@@ -22,7 +22,7 @@ nlohmann::json SegmentationPostprocessor::postprocess(
     // Expected output shape: {1, C, H, W}    if outputArgmax == true
     //                      or {1, H, W}       if already class-map (outputArgmax == false)
 
-    const float* raw = output.data.data();
+    const float* raw = output.dataPtrOrCopy();
     size_t total = output.totalElements();
 
     if (total == 0)
