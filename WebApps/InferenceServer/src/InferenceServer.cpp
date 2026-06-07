@@ -13,6 +13,7 @@
 #include "../include/handlers/ModelUnloadHandler.h"
 #include "../include/handlers/HealthHandler.h"
 #include "../include/handlers/ReadyHandler.h"
+#include "../include/handlers/RawPredictHandler.h"
 #ifdef ENABLE_TENSORRT
 #include "../include/handlers/ConvertHandler.h"
 #endif
@@ -248,6 +249,7 @@ void InferenceServer::initializeRouter()
     });
 
     httpServer_.Post("/predict", std::make_shared<PredictHandler>(modelFactory_.get(), batcher_.get()));
+    httpServer_.Post("/predict/raw", std::make_shared<RawPredictHandler>(modelFactory_.get(), batcher_.get()));
     httpServer_.Post("/predict/batch", std::make_shared<BatchPredictHandler>(modelFactory_.get()));
     httpServer_.Post("/predict/proto", std::make_shared<ProtoPredictHandler>(modelFactory_.get()));
     httpServer_.Get("/metrics", std::make_shared<MetricsHandler>());

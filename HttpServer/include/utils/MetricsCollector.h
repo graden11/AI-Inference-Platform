@@ -42,6 +42,15 @@ struct ModelMetrics {
     std::atomic<int64_t> bucket_inf{0};
 };
 
+/// Per-phase latency within a single inference pipeline call.
+/// key = "model:task:phase" (e.g. "resnet50:classification:preprocess")
+struct PhaseMetrics {
+    std::atomic<int64_t> count{0};
+    std::atomic<int64_t> latency_us_sum{0};
+    std::atomic<int64_t> latency_us_min{INT64_MAX};
+    std::atomic<int64_t> latency_us_max{0};
+};
+
 class MetricsCollector
 {
 public:
@@ -49,6 +58,23 @@ public:
     {
         static MetricsCollector mc;
         return mc;
+    }
+
+    void recordPhaseLatency(const std::string& model, const std::string& taskType,
+                            const std::string& phase, int64_t latency_us)
+    {
+        std::string key = model + ":" + taskType + ":" + phase;
+        auto &m = getOrCreatePhase(key);
+        m.count.fetch_add(1, std::memory_order_relaxed);
+        m.latency_us_sum.fetch_add(latency_us, std::memory_order_relaxed);
+        int64_t oldMin = m.latency_us_min.load(std::memory_order_relaxed);
+        while (latency_us < oldMin &&
+               !m.latency_us_min.compare_exchange_weak(oldMin, latency_us, std::memory_order_relaxed))
+            ;
+        int64_t oldMax = m.latency_us_max.load(std::memory_order_relaxed);
+        while (latency_us > oldMax &&
+               !m.latency_us_max.compare_exchange_weak(oldMax, latency_us, std::memory_order_relaxed))
+            ;
     }
 
     void setInflightSource(const std::atomic<int>* src) { inflightSrc_ = src; }
@@ -186,6 +212,30 @@ public:
         }
         j["model_inference"] = mods;
 
+        // Phase-level latency breakdown
+        nlohmann::json phases = nlohmann::json::object();
+        for (auto &[key, m] : phaseMetrics_)
+        {
+            // key = "model:task:phase"
+            auto first  = key.find(':');
+            auto second = key.rfind(':');
+            std::string model = key.substr(0, first);
+            std::string task  = key.substr(first + 1, second - first - 1);
+            std::string phase = key.substr(second + 1);
+            nlohmann::json pm;
+            pm["model"] = model;
+            pm["task"] = task;
+            pm["phase"] = phase;
+            pm["count"] = m.count.load(std::memory_order_relaxed);
+            int64_t c = m.count.load(std::memory_order_relaxed);
+            pm["avg_latency_us"] = c > 0 ? m.latency_us_sum.load(std::memory_order_relaxed) / c : 0;
+            int64_t minVal = m.latency_us_min.load(std::memory_order_relaxed);
+            pm["latency_us_min"] = (minVal == INT64_MAX) ? 0 : minVal;
+            pm["latency_us_max"] = m.latency_us_max.load(std::memory_order_relaxed);
+            phases[key] = pm;
+        }
+        j["pipeline_phases"] = phases;
+
         return j;
     }
 
@@ -296,9 +346,22 @@ private:
         return modelMetrics_[name];
     }
 
+    PhaseMetrics &getOrCreatePhase(const std::string &name)
+    {
+        {
+            std::shared_lock<std::shared_mutex> lock(mutex_);
+            auto it = phaseMetrics_.find(name);
+            if (it != phaseMetrics_.end())
+                return it->second;
+        }
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        return phaseMetrics_[name];
+    }
+
     muduo::Timestamp startTime_;
     std::unordered_map<std::string, EndpointMetrics> endpoints_;
     std::unordered_map<std::string, ModelMetrics> modelMetrics_;
+    std::unordered_map<std::string, PhaseMetrics> phaseMetrics_;
     mutable std::shared_mutex mutex_;
     const std::atomic<int>* inflightSrc_ = nullptr;
 };

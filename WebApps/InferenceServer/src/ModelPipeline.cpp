@@ -38,6 +38,33 @@ static std::vector<uint8_t> readFileBytes(const std::string& path)
 }
 
 // ---------------------------------------------------------------------------
+// Per-phase latency recording helpers
+// ---------------------------------------------------------------------------
+namespace {
+    using Clock = std::chrono::steady_clock;
+    using Us    = std::chrono::microseconds;
+
+    struct PhaseTimer {
+        Clock::time_point start;
+        std::string modelName;
+        std::string taskType;
+
+        explicit PhaseTimer(std::string model, std::string task)
+            : start(Clock::now()), modelName(std::move(model)), taskType(std::move(task)) {}
+
+        int64_t record(const char* phase)
+        {
+            int64_t elapsed = std::chrono::duration_cast<Us>(
+                Clock::now() - start).count();
+            MetricsCollector::instance().recordPhaseLatency(
+                modelName, taskType, phase, elapsed);
+            start = Clock::now();  // reset for next phase
+            return elapsed;
+        }
+    };
+} // anonymous namespace
+
+// ---------------------------------------------------------------------------
 // ModelPipeline
 // ---------------------------------------------------------------------------
 ModelPipeline::ModelPipeline(ModelConfig config,
@@ -66,6 +93,9 @@ nlohmann::json ModelPipeline::doPredictJson(const std::vector<uint8_t>& imageByt
     LOG_INFO << "ModelPipeline::doPredictJson task=" << taskTypeToString(config_.task)
              << " model=" << config_.name << " bytes=" << imageBytes.size();
 
+    std::string taskStr = taskTypeToString(config_.task);
+    PhaseTimer timer(config_.name, taskStr);
+
     // 1. Preprocess: image bytes → CHW float tensor
     auto input = preprocessor_->preprocess(imageBytes);
     if (input.empty())
@@ -75,7 +105,7 @@ nlohmann::json ModelPipeline::doPredictJson(const std::vector<uint8_t>& imageByt
         err["message"] = "failed to decode/preprocess image";
         return err;
     }
-    LOG_INFO << "doPredictJson: preprocess done, tensor size=" << input.size();
+    timer.record("preprocess");
 
     // 2. Build input shape (batch=1 + spatial dims from config)
     bool isHWC = config_.input.layout == "hwc";
@@ -87,17 +117,11 @@ nlohmann::json ModelPipeline::doPredictJson(const std::vector<uint8_t>& imageByt
     };
 
     // 3. Infer: use inferMulti for future multi-output support
-    LOG_INFO << "doPredictJson: calling infer, inputShape=["
-             << inputShape[0] << "," << inputShape[1] << ","
-             << inputShape[2] << "," << inputShape[3] << "]";
     InferenceOutput inferOut;
     try {
-        auto t0 = std::chrono::steady_clock::now();
         inferOut = backend_->inferMulti(input, inputShape);
-        auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::steady_clock::now() - t0).count();
-        MetricsCollector::instance().recordModelLatency(config_.name,
-            taskTypeToString(config_.task), elapsed, 1);
+        int64_t inferElapsed = timer.record("inference");
+        MetricsCollector::instance().recordModelLatency(config_.name, taskStr, inferElapsed, 1);
     } catch (const std::exception& e) {
         LOG_ERROR << "doPredictJson: infer threw exception: " << e.what();
         nlohmann::json err;
@@ -111,12 +135,11 @@ nlohmann::json ModelPipeline::doPredictJson(const std::vector<uint8_t>& imageByt
         err["message"] = "inference error: unknown exception";
         return err;
     }
-    LOG_INFO << "doPredictJson: infer done, output size=" << inferOut.totalElements()
-             << " shape[0]=" << (inferOut.shape.empty() ? -1 : inferOut.shape[0]);
 
     // 4. Postprocess: tensor → JSON
-    LOG_INFO << "doPredictJson: calling postprocess";
     auto result = postprocessor_->postprocess(inferOut, labels_);
+    timer.record("postprocess");
+
     LOG_INFO << "doPredictJson: done, status=" << result.value("status", "?");
     return result;
 }
