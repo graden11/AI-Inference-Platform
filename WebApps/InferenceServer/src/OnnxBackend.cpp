@@ -141,4 +141,78 @@ std::vector<float> OnnxBackend::inferBatch(const std::vector<float>& batchInput,
     return std::vector<float>(logits, logits + elemCount);
 }
 
+InferenceOutput OnnxBackend::inferMulti(const std::vector<float>& input,
+                                         const std::vector<int64_t>& inputShape)
+{
+    InferenceOutput io;
+    if (!session_) return io;
+
+    Ort::Value inputValue = Ort::Value::CreateTensor<float>(
+        memInfo_,
+        const_cast<float*>(input.data()),
+        input.size(),
+        inputShape.data(),
+        inputShape.size());
+
+    const char* inputNames[]  = {inputName_.c_str()};
+    const char* outputNames[] = {outputName_.c_str()};
+
+    {
+        std::lock_guard<std::mutex> lock(inferenceMutex_);
+        auto outputValues = session_->Run(Ort::RunOptions{},
+                                          inputNames, &inputValue, 1,
+                                          outputNames, 1);
+
+        // Transfer Ort::Value ownership into a shared_ptr so InferenceOutput
+        // can outlive this stack frame without copying the tensor data.
+        auto holder = std::make_shared<std::vector<Ort::Value>>(std::move(outputValues));
+        float* logits = (*holder)[0].GetTensorMutableData<float>();
+        auto typeInfo = (*holder)[0].GetTensorTypeAndShapeInfo();
+        auto outShape = typeInfo.GetShape();
+        size_t elemCount = typeInfo.GetElementCount();
+
+        io.shape.assign(outShape.begin(), outShape.end());
+        io.backendHandle = holder;
+        io.dataPtr = logits;
+        io.dataSize = elemCount;
+    }
+    return io;
+}
+
+InferenceOutput OnnxBackend::inferBatchMulti(const std::vector<float>& batchInput,
+                                              const std::vector<int64_t>& batchShape)
+{
+    InferenceOutput io;
+    if (!session_) return io;
+
+    Ort::Value inputValue = Ort::Value::CreateTensor<float>(
+        memInfo_,
+        const_cast<float*>(batchInput.data()),
+        batchInput.size(),
+        batchShape.data(),
+        batchShape.size());
+
+    const char* inputNames[]  = {inputName_.c_str()};
+    const char* outputNames[] = {outputName_.c_str()};
+
+    {
+        std::lock_guard<std::mutex> lock(inferenceMutex_);
+        auto outputValues = session_->Run(Ort::RunOptions{},
+                                          inputNames, &inputValue, 1,
+                                          outputNames, 1);
+
+        auto holder = std::make_shared<std::vector<Ort::Value>>(std::move(outputValues));
+        float* logits = (*holder)[0].GetTensorMutableData<float>();
+        auto typeInfo = (*holder)[0].GetTensorTypeAndShapeInfo();
+        auto outShape = typeInfo.GetShape();
+        size_t elemCount = typeInfo.GetElementCount();
+
+        io.shape.assign(outShape.begin(), outShape.end());
+        io.backendHandle = holder;
+        io.dataPtr = logits;
+        io.dataSize = elemCount;
+    }
+    return io;
+}
+
 } // namespace inference

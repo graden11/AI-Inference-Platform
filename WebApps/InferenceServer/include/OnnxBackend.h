@@ -26,6 +26,14 @@ public:
                                   const std::vector<int64_t>& batchShape,
                                   std::vector<int64_t>& outputShape) override;
 
+    /// Zero-copy single-sample: holds Ort::Value via InferenceOutput.backendHandle.
+    InferenceOutput inferMulti(const std::vector<float>& input,
+                               const std::vector<int64_t>& inputShape) override;
+
+    /// Zero-copy batch: holds Ort::Value via InferenceOutput.backendHandle.
+    InferenceOutput inferBatchMulti(const std::vector<float>& batchInput,
+                                    const std::vector<int64_t>& batchShape) override;
+
     int  maxBatchSize() const override { return maxBatchSize_; }
     int  detectedWidth()  const { return detectedWidth_; }
     int  detectedHeight() const { return detectedHeight_; }
