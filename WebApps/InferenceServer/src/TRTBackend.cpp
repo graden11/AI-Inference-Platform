@@ -370,23 +370,29 @@ std::vector<float> TRTBackend::inferBatch(const std::vector<float>& batchInput,
 
     if (batchSize > maxBatchSize_ || !context_ || !h_batch_input_)
     {
-        // Fallback: sequential inference
+        // Fallback: chunk into maxBatchSize_ slices, each sent to the GPU in one
+        // enqueue. Avoids per-sample slot acquire/release + H2D/D2H round-trips.
         int c = config_.input.channels;
         int h = config_.input.preferred_height;
         int w = config_.input.preferred_width;
         size_t perSampleElems = static_cast<size_t>(c) * h * w;
 
         std::vector<float> allResults;
-        allResults.reserve(batchSize * (outputSize_ / sizeof(float)));
-        for (int i = 0; i < batchSize; ++i)
+        size_t numOut = outputSize_ / sizeof(float);
+        allResults.reserve(batchSize * numOut);
+
+        int chunkSize = maxBatchSize_;
+        if (chunkSize < 1) chunkSize = 1;
+        for (int i = 0; i < batchSize; i += chunkSize)
         {
-            auto begin = batchInput.begin() + i * perSampleElems;
-            auto end   = begin + perSampleElems;
-            std::vector<float> sample(begin, end);
-            std::vector<int64_t> singleShape = {1, c, h, w};
-            std::vector<int64_t> singleOutShape;
-            auto out = infer(sample, singleShape, singleOutShape);
-            allResults.insert(allResults.end(), out.begin(), out.end());
+            int cur = std::min(chunkSize, batchSize - i);
+            auto chunkBegin = batchInput.begin() + i * perSampleElems;
+            auto chunkEnd   = chunkBegin + cur * perSampleElems;
+            std::vector<float> chunkData(chunkBegin, chunkEnd);
+            std::vector<int64_t> chunkShape = {cur, c, h, w};
+            std::vector<int64_t> chunkOutShape;
+            auto chunkResult = inferBatch(chunkData, chunkShape, chunkOutShape);
+            allResults.insert(allResults.end(), chunkResult.begin(), chunkResult.end());
         }
         outputShape = {batchSize, static_cast<int64_t>(allResults.size() / batchSize)};
         return allResults;
