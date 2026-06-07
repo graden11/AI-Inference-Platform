@@ -16,12 +16,14 @@ nlohmann::json ClassificationPostprocessor::postprocess(
     const InferenceOutput& output,
     const std::vector<std::string>& labels)
 {
-    const float* logits = output.data.data();
+    return postprocessSample(output.data.data(), output.totalElements(), labels);
+}
 
-    // output.shape[1] is the number of classes (skip batch dim)
-    size_t numClasses = output.shape.size() >= 2
-        ? static_cast<size_t>(output.shape[1])
-        : output.totalElements();
+nlohmann::json ClassificationPostprocessor::postprocessSample(
+    const float* logits,
+    size_t numClasses,
+    const std::vector<std::string>& labels)
+{
 
     // Build index vector and partial-sort by logit value
     std::vector<int> indices(numClasses);

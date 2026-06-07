@@ -22,7 +22,9 @@ std::vector<nlohmann::json> Postprocessor::postprocessBatch(
     int batchSize,
     const std::vector<std::string>& labels)
 {
-    // Default: split evenly by outputShape[1] (works for classification)
+    // Default: split evenly by outputShape[1] (works for classification).
+    // Uses postprocessSample() — a zero-copy view — instead of building a
+    // temporary std::vector<float> copy per sample.
     std::vector<nlohmann::json> results;
     results.reserve(batchSize);
 
@@ -32,15 +34,8 @@ std::vector<nlohmann::json> Postprocessor::postprocessBatch(
 
     for (int i = 0; i < batchSize; ++i)
     {
-        auto begin = batchOutput.data.begin() + i * perSampleOut;
-        auto end   = begin + perSampleOut;
-        std::vector<float> sampleOut(begin, end);
-
-        InferenceOutput sampleIO;
-        sampleIO.data  = std::move(sampleOut);
-        sampleIO.shape = {1, static_cast<int64_t>(perSampleOut)};
-
-        results.push_back(postprocess(sampleIO, labels));
+        const float* sample = batchOutput.data.data() + i * perSampleOut;
+        results.push_back(postprocessSample(sample, perSampleOut, labels));
     }
     return results;
 }
