@@ -1,6 +1,6 @@
 {
   "batching": {
-    "enabled": false,
+    "enabled": true,
     "max_batch_size": 8,
     "max_delay_ms": 10
   },

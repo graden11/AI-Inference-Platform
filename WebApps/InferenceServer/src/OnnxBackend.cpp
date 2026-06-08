@@ -36,6 +36,16 @@ OnnxBackend::OnnxBackend(const ModelConfig& config)
     auto inputTypeInfo = session_->GetInputTypeInfo(0);
     auto inputTensorInfo = inputTypeInfo.GetTensorTypeAndShapeInfo();
     auto inputShape = inputTensorInfo.GetShape();
+
+    // If the ONNX model has a fixed batch dimension (e.g. 1 for squeezenet),
+    // cap maxBatchSize_ so that ModelPipeline::predictBatch knows to fall back
+    // to per-sample inference instead of passing N>1 to session_->Run().
+    if (!inputShape.empty() && inputShape[0] > 0) {
+        maxBatchSize_ = std::min(maxBatchSize_, static_cast<int>(inputShape[0]));
+        LOG_INFO << "OnnxBackend: static batch dim = " << inputShape[0]
+                 << " (maxBatchSize capped to " << maxBatchSize_ << ")";
+    }
+
     if (inputShape.size() >= 3) {
         detectedChannels_ = static_cast<int>(inputShape[1]);
         detectedHeight_   = static_cast<int>(inputShape[2]);

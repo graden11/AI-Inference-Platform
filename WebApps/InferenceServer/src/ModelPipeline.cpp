@@ -174,35 +174,52 @@ std::vector<std::string> ModelPipeline::predictBatch(
     if (batchSize == 0)
         return {};
 
-    // 1. Preprocess all images, writing directly into batch buffer at offset
-    int perSampleElems = config_.input.elemCount();
-    thread_local std::vector<float> batchInput;
-    batchInput.assign(batchSize * perSampleElems, 0.0f);
+    int maxBatch = maxBatchSize();
 
-    for (size_t i = 0; i < images.size(); ++i)
+    // Fallback for models with static batch=1 (e.g. squeezenet):
+    // process each sample individually to avoid ONNX dimension errors.
+    if (maxBatch <= 1)
     {
-        if (!preprocessor_->preprocessInto(images[i], batchInput, i * perSampleElems))
-        {
-            LOG_ERROR << "predictBatch: failed to decode image " << i << ", zero-filling";
-        }
+        std::vector<std::string> results;
+        results.reserve(images.size());
+        for (auto& img : images)
+            results.push_back(predictFromBytes(img));
+        return results;
     }
 
-    // 2. Batch infer
-    bool isHWC = config_.input.layout == "hwc";    std::vector<int64_t> batchShape = {
-        batchSize,
-        isHWC ? config_.input.preferred_height : config_.input.channels,
-        isHWC ? config_.input.preferred_width  : config_.input.preferred_height,
-        isHWC ? config_.input.channels         : config_.input.preferred_width
-    };
-    auto batchIO = backend_->inferBatchMulti(batchInput, batchShape);
+    int perSampleElems = config_.input.elemCount();
+    thread_local std::vector<float> batchInput;
 
-    // 3. Postprocess — delegate to per-task postprocessBatch
-    auto resultsJson = postprocessor_->postprocessBatch(batchIO, batchSize, labels_);
-
+    // Process in chunks when batch exceeds the backend limit.
     std::vector<std::string> results;
-    results.reserve(resultsJson.size());
-    for (auto& j : resultsJson)
-        results.push_back(j.dump());
+    for (int start = 0; start < batchSize; start += maxBatch)
+    {
+        int chunk = std::min(maxBatch, batchSize - start);
+        batchInput.assign(chunk * perSampleElems, 0.0f);
+
+        for (int i = 0; i < chunk; ++i)
+        {
+            if (!preprocessor_->preprocessInto(images[start + i], batchInput,
+                                               i * perSampleElems))
+            {
+                LOG_ERROR << "predictBatch: failed to decode image "
+                          << (start + i) << ", zero-filling";
+            }
+        }
+
+        bool isHWC = config_.input.layout == "hwc";
+        std::vector<int64_t> chunkShape = {
+            chunk,
+            isHWC ? config_.input.preferred_height : config_.input.channels,
+            isHWC ? config_.input.preferred_width  : config_.input.preferred_height,
+            isHWC ? config_.input.channels         : config_.input.preferred_width
+        };
+        auto batchIO = backend_->inferBatchMulti(batchInput, chunkShape);
+        auto resultsJson = postprocessor_->postprocessBatch(batchIO, chunk, labels_);
+
+        for (auto& j : resultsJson)
+            results.push_back(j.dump());
+    }
     return results;
 }
 
