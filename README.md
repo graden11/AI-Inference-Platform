@@ -1,8 +1,8 @@
-# Kama-HTTPServer
+# AI Inference Platform
 
-基于 muduo 的高性能 C++17 AI 推理服务平台。支持 ONNX Runtime (CPU) 和 TensorRT (GPU)，多模型热加载，分类/检测/分割/特征提取多任务类型。
+基于 muduo 的高性能 C++17 AI 推理服务平台。支持 ONNX Runtime (CPU) 和 TensorRT (GPU) 双后端，6 个模型覆盖分类/检测/分割/特征提取 4 种任务，运行时热加载/热卸载，动态批处理。
 
-**特性：** 事件驱动架构 · 插件式 Backend · 多模型多任务 · 热加载/热卸载 · 请求级动态批处理 · Prometheus 指标 · 结构化访问日志 · 优雅关闭 · Redis/内存双模式会话
+**特性：** 事件驱动架构 · ONNX + TensorRT 双后端 · 分类/检测/分割/特征提取 · 热加载/热卸载 · 请求级动态批处理 · 速率限制 · Prometheus 指标 · 结构化访问日志 · 优雅关闭 · Redis/内存双模式会话
 
 ---
 
@@ -17,21 +17,23 @@
 ### 1. 获取项目
 
 ```bash
-git clone <repo-url> && cd httpserver
+git clone https://github.com/graden11/webserver.git && cd httpserver
 ```
 
 ### 2. 放置模型文件
 
-模型文件 **不在 Git 仓库中**（总计 ~174 MB），需放入 `models/`：
+模型文件 **不在 Git 仓库中**（总计 ~470 MB），需放入 `models/`：
 
-| 文件 | 大小 | 说明 |
-|------|------|------|
-| `resnet50_classification.onnx` | ~98 MB | ResNet-50 分类（必选） |
-| `yolov8l.onnx` | ~167 MB | YOLOv8l COCO 检测（可选） |
-| `resnet50_classification.engine` | ~50 MB | TensorRT FP16 引擎（GPU 可选） |
-| `resnet50_int8.engine` | ~26 MB | TensorRT INT8 引擎（GPU 可选） |
-| `imagenet_classes.txt` | ~10 KB | ImageNet 1000 类标签 |
-| `coco_80.txt` | ~0.6 KB | COCO 80 类标签（检测用） |
+| 文件 | 大小 | 类型 | 任务 |
+|------|------|------|------|
+| `squeezenet1.1-7.onnx` | ~5 MB | ONNX | 分类 |
+| `deeplabv3p-resnet50-human.onnx` | ~47 MB | ONNX | 分割 |
+| `yolov8l.onnx` | ~175 MB | ONNX | 检测 |
+| `vision_model.onnx` | ~143 MB | ONNX | 特征提取 |
+| `resnet50_classification.engine` | ~52 MB | TensorRT FP16 | 分类 |
+| `resnet50_int8.engine` | ~52 MB | TensorRT INT8 | 分类 |
+| `imagenet_classes.txt` | ~10 KB | — | ImageNet 1000 类标签 |
+| `coco_80.txt` | ~0.6 KB | — | COCO 80 类标签（检测用） |
 
 > 如果模型文件缺失，`start.sh` 会给出清晰提示。无 GPU 时仅需 ONNX 模型。
 
@@ -79,7 +81,7 @@ curl -s -X POST http://localhost/predict -H 'Content-Type: application/json' -d 
 |  +------------------+  +------------------+  +-----------+ |
 |  | MetricsMiddleware|  |  CorsMiddleware  |  | Session   | |
 |  +------------------+  +------------------+  +-----------+ |
-|  |                   Router (23 条路由)                   | |
+|  |                   Router (20+ 条路由)                  | |
 |  +------------------------------------------------------+ |
 +----------------------------------------------------------+
         │                               │
@@ -124,19 +126,20 @@ curl -s -X POST http://localhost/predict -H 'Content-Type: application/json' -d 
 | GET | `/backend_data` | 是 | 在线统计 JSON |
 | POST | `/predict` | — | 图像推理 (JSON) |
 | POST | `/predict/batch` | — | 批量图像推理 |
+| POST | `/predict/raw` | — | 原始图像推理 (binary body) |
 | POST | `/predict/proto` | — | 图像推理 (Protobuf) |
-| POST | `/models/delete` | 是 | 删除模型文件 |
+| POST | `/models/load` | 是 | 动态加载模型 |
+| DELETE | `/models/:name/:version` | 是 | 卸载模型 |
+| GET | `/models` | — | 模型列表 |
 | GET | `/models/available` | 是 | 列出 models 目录文件 |
 | GET | `/models/labels` | 是 | 列出标签文件 |
-| POST | `/models/convert` | — | ONNX → TensorRT 转换 (GPU only) |
-| GET | `/models/convert/status` | — | 查看转换进度 |
+| POST | `/models/delete` | 是 | 删除模型文件 |
+| POST | `/models/convert` | 是 | ONNX → TensorRT 转换 (GPU only) |
+| GET | `/models/convert/status` | 是 | 查看转换进度 |
 | GET | `/metrics` | — | Prometheus 指标 |
 | GET | `/metrics/json` | — | JSON 指标 |
 | GET | `/health` | — | 存活检查 |
 | GET | `/ready` | — | 就绪检查 |
-| POST | `/models/load` | 是 | 动态加载模型 |
-| GET | `/models` | — | 模型列表 |
-| DELETE | `/models/:name/:version` | 是 | 卸载模型 |
 
 ### 核心端点示例
 
@@ -291,7 +294,7 @@ curl -X POST http://localhost/predict \
 
 静态配置的模型在启动时加载，**不可**通过 API 卸载。
 
-> 自定义推理引擎（非 ResNet-50 架构）需实现 `InferenceEngine` 接口并注册到 `ModelFactory`，详见 [LEARNING.md](LEARNING.md)。
+> 自定义推理引擎需实现 `InferenceEngine` 接口并注册到 `ModelFactory`，详见 [CLAUDE.md](CLAUDE.md)。
 
 ---
 
@@ -306,7 +309,7 @@ curl -X POST http://localhost/predict \
   "mysql": { "host": "tcp://mysql:3306", "user": "root", "password": "root", "database": "inference_platform", "pool_size": 10 },
   "redis": { "host": "redis", "port": 6379, "pool_size": 5 },
   "models": { "labels_path": "/app/models/imagenet_classes.txt", "engines": { "resnet50": { "type": "onnx", "path": "/app/models/resnet50_classification.onnx" } } },
-  "batching": { "enabled": false, "max_batch_size": 8, "max_delay_ms": 10 }
+  "batching": { "enabled": true, "max_batch_size": 8, "max_delay_ms": 10 }
 }
 ```
 
@@ -395,8 +398,6 @@ curl http://localhost/metrics          # Prometheus 指标
 | TensorRT FP16 | 16.3 ms | 20.0 ms | 152 |
 | ONNX CPU | 76.3 ms | 83.6 ms | 44 |
 
-详见 [pressureresult.md](pressureresult.md)。
-
 ---
 
 ## 开发
@@ -417,18 +418,14 @@ docker compose -f docker-compose.dev.yml restart
 | 文档 | 内容 |
 |------|------|
 | [CLAUDE.md](CLAUDE.md) | 构建命令、架构细节、AI 助手使用指南 |
-| [LEARNING.md](LEARNING.md) | 9 阶段学习路线、设计模式速查 |
-| [DEVELOPMENT.md](DEVELOPMENT.md) | 开发方向、技术选型讨论 |
-| [DEVLOG.md](DEVLOG.md) | Claude Code 开发日志 |
 
 ---
 
 ## 已知限制
 
 - **Linux only**：muduo 基于 epoll，不支持 Windows/macOS
-- **模型文件不在仓库**：~174 MB，需单独放置
+- **模型文件不在仓库**：~470 MB，需单独放置
 - **GPU 推理串行**：`gpu_mutex_` 同一时刻一个 GPU 任务
-- **无频率限制**：公网暴露需额外保护
 - **项目路径依赖**：HTML 资源通过 CWD 相对路径读取
 
 ---
