@@ -124,6 +124,9 @@ InferenceOutput RemoteBackend::remoteCall(const std::vector<float>& input,
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseStr);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, static_cast<long>(timeoutMs_));
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 5000L);
+    curl_easy_setopt(curl, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+    curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+    curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
 
     CURLcode res = curl_easy_perform(curl);
     long httpCode = 0;
