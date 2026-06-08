@@ -21,6 +21,7 @@ public:
         std::string modelName;
         std::vector<uint8_t> imageData;
         std::shared_ptr<std::promise<std::string>> promise;
+        std::chrono::steady_clock::time_point enqueueTime;
     };
 
     RequestBatcher(ModelFactory* factory, int maxBatchSize,

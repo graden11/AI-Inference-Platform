@@ -51,6 +51,17 @@ struct PhaseMetrics {
     std::atomic<int64_t> latency_us_max{0};
 };
 
+/// Batch efficiency metrics per model.
+/// key = "modelName" (e.g. "vision_model_onnx")
+struct BatchMetrics {
+    std::atomic<int64_t> batches_total{0};
+    std::atomic<int64_t> requests_total{0};
+    std::atomic<int64_t> batch_size_sum{0};
+    std::atomic<int64_t> queue_wait_us_sum{0};
+    std::atomic<int64_t> queue_wait_us_max{0};
+    std::atomic<int64_t> queue_wait_us_min{INT64_MAX};
+};
+
 class MetricsCollector
 {
 public:
@@ -74,6 +85,26 @@ public:
         int64_t oldMax = m.latency_us_max.load(std::memory_order_relaxed);
         while (latency_us > oldMax &&
                !m.latency_us_max.compare_exchange_weak(oldMax, latency_us, std::memory_order_relaxed))
+            ;
+    }
+
+    void recordBatchMetrics(const std::string& model,
+                            int batchSize,
+                            int64_t queueWaitUs)
+    {
+        auto &m = getOrCreateBatch(model);
+        m.batches_total.fetch_add(1, std::memory_order_relaxed);
+        m.requests_total.fetch_add(batchSize, std::memory_order_relaxed);
+        m.batch_size_sum.fetch_add(batchSize, std::memory_order_relaxed);
+        m.queue_wait_us_sum.fetch_add(queueWaitUs, std::memory_order_relaxed);
+
+        int64_t oldMin = m.queue_wait_us_min.load(std::memory_order_relaxed);
+        while (queueWaitUs < oldMin &&
+               !m.queue_wait_us_min.compare_exchange_weak(oldMin, queueWaitUs, std::memory_order_relaxed))
+            ;
+        int64_t oldMax = m.queue_wait_us_max.load(std::memory_order_relaxed);
+        while (queueWaitUs > oldMax &&
+               !m.queue_wait_us_max.compare_exchange_weak(oldMax, queueWaitUs, std::memory_order_relaxed))
             ;
     }
 
@@ -236,6 +267,29 @@ public:
         }
         j["pipeline_phases"] = phases;
 
+        // Batch efficiency metrics
+        nlohmann::json bat = nlohmann::json::object();
+        for (auto &[model, m] : batchMetrics_)
+        {
+            nlohmann::json bm;
+            bm["model"] = model;
+            bm["batches_total"]  = m.batches_total.load(std::memory_order_relaxed);
+            bm["requests_total"] = m.requests_total.load(std::memory_order_relaxed);
+            int64_t nb = m.batches_total.load(std::memory_order_relaxed);
+            bm["avg_batch_size"] = nb > 0
+                ? static_cast<double>(m.batch_size_sum.load(std::memory_order_relaxed)) / nb
+                : 0.0;
+            int64_t nr = m.requests_total.load(std::memory_order_relaxed);
+            bm["avg_queue_wait_us"] = nr > 0
+                ? m.queue_wait_us_sum.load(std::memory_order_relaxed) / nr
+                : 0;
+            int64_t minVal = m.queue_wait_us_min.load(std::memory_order_relaxed);
+            bm["queue_wait_us_min"] = (minVal == INT64_MAX) ? 0 : minVal;
+            bm["queue_wait_us_max"] = m.queue_wait_us_max.load(std::memory_order_relaxed);
+            bat[model] = bm;
+        }
+        j["batching"] = bat;
+
         return j;
     }
 
@@ -358,10 +412,23 @@ private:
         return phaseMetrics_[name];
     }
 
+    BatchMetrics &getOrCreateBatch(const std::string &name)
+    {
+        {
+            std::shared_lock<std::shared_mutex> lock(mutex_);
+            auto it = batchMetrics_.find(name);
+            if (it != batchMetrics_.end())
+                return it->second;
+        }
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        return batchMetrics_[name];
+    }
+
     muduo::Timestamp startTime_;
     std::unordered_map<std::string, EndpointMetrics> endpoints_;
     std::unordered_map<std::string, ModelMetrics> modelMetrics_;
     std::unordered_map<std::string, PhaseMetrics> phaseMetrics_;
+    std::unordered_map<std::string, BatchMetrics> batchMetrics_;
     mutable std::shared_mutex mutex_;
     const std::atomic<int>* inflightSrc_ = nullptr;
 };

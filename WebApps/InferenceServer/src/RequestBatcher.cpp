@@ -1,6 +1,8 @@
 #include "../include/RequestBatcher.h"
 #include "../include/InferenceEngine.h"
 
+#include "../../../HttpServer/include/utils/MetricsCollector.h"
+
 #include <muduo/base/Logging.h>
 
 RequestBatcher::RequestBatcher(ModelFactory* factory, int maxBatchSize,
@@ -46,7 +48,8 @@ std::future<std::string> RequestBatcher::submit(std::string modelName,
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        queue_.push_back({std::move(modelName), std::move(imageData), std::move(promise)});
+        queue_.push_back({std::move(modelName), std::move(imageData), std::move(promise),
+                          std::chrono::steady_clock::now()});
     }
     cv_.notify_one();
 
@@ -89,13 +92,23 @@ void RequestBatcher::workerLoop()
         if (batch.empty())
             continue;
 
-        // Group by model name
+        // Group by model name and record batch metrics
+        auto now = std::chrono::steady_clock::now();
         std::unordered_map<std::string, std::vector<size_t>> groups;
         for (size_t i = 0; i < batch.size(); ++i)
             groups[batch[i].modelName].push_back(i);
 
         for (auto& [modelName, indices] : groups)
         {
+            int bs = static_cast<int>(indices.size());
+            int64_t maxWait = 0;
+            for (auto idx : indices)
+            {
+                int64_t wait = std::chrono::duration_cast<std::chrono::microseconds>(
+                    now - batch[idx].enqueueTime).count();
+                if (wait > maxWait) maxWait = wait;
+            }
+            MetricsCollector::instance().recordBatchMetrics(modelName, bs, maxWait);
             auto engine = factory_->getModel(modelName);
             if (!engine)
             {
