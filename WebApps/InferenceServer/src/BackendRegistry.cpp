@@ -1,5 +1,6 @@
 #include "../include/BackendRegistry.h"
 #include "../include/OnnxBackend.h"
+#include "../include/RemoteBackend.h"
 #ifdef ENABLE_TENSORRT
 #include "../include/TRTBackend.h"
 #endif
@@ -51,6 +52,12 @@ struct AutoRegisterBuiltins {
 
         reg.registerBackend("onnx", [](const ModelConfig& cfg) {
             return std::make_unique<OnnxBackend>(cfg);
+        });
+
+        // Remote backend: forwards tensor to GPU server over HTTP.
+        // config.path must be the remote URL (e.g. http://127.0.0.1:9080).
+        reg.registerBackend("remote", [](const ModelConfig& cfg) {
+            return std::make_unique<RemoteBackend>(cfg);
         });
 
 #ifdef ENABLE_TENSORRT

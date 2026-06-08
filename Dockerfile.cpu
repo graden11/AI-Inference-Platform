@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
     cmake g++ make libssl-dev \
     libmysqlclient-dev libmysqlcppconn-dev \
     nlohmann-json3-dev protobuf-compiler libprotobuf-dev \
-    libspdlog-dev libhiredis-dev \
+    libspdlog-dev libhiredis-dev libcurl4-openssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY . /project
@@ -22,7 +22,7 @@ FROM ubuntu:22.04
 
 # Install runtime dependencies (incl libstdc++ from builder for GLIBCXX_3.4.30)
 RUN apt-get update && apt-get install -y \
-    libmysqlcppconn7v5 libssl3 libprotobuf23 libfmt8 libhiredis0.14 curl \
+    libmysqlcppconn7v5 libssl3 libprotobuf23 libfmt8 libhiredis0.14 curl libcurl4 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy runtime libs from builder stage (matching compiler version)

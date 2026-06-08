@@ -252,6 +252,13 @@ void InferenceServer::initializeRouter()
     httpServer_.Post("/predict/raw", std::make_shared<RawPredictHandler>(modelFactory_.get(), batcher_.get()));
     httpServer_.Post("/predict/batch", std::make_shared<BatchPredictHandler>(modelFactory_.get()));
     httpServer_.Post("/predict/proto", std::make_shared<ProtoPredictHandler>(modelFactory_.get()));
+
+    // GPU-side tensor endpoint — called by RemoteBackend on the cloud server.
+    // Accepts preprocessed float tensors, runs inference, returns raw output.
+    httpServer_.Post("/predict/tensor", [this](const http::HttpRequest& req, http::HttpResponse* resp) {
+        handleTensorPredict(req, resp);
+    });
+
     httpServer_.Get("/metrics", std::make_shared<MetricsHandler>());
     httpServer_.Get("/metrics/json", std::make_shared<MetricsHandler>());
     httpServer_.Get("/health", std::make_shared<HealthHandler>());
@@ -497,6 +504,82 @@ bool InferenceServer::ensureAuthenticated(const http::HttpRequest& req, http::Ht
     resp->setBody(body);
     resp->setCloseConnection(true);
     return false;
+}
+
+void InferenceServer::handleTensorPredict(const http::HttpRequest& req, http::HttpResponse* resp)
+{
+    try {
+        auto body = nlohmann::json::parse(req.getBody());
+
+        std::vector<float> input = body["input"].get<std::vector<float>>();
+        std::vector<int64_t> inputShape = body["input_shape"].get<std::vector<int64_t>>();
+        int batchSize = body.value("batch_size", 1);
+        std::string modelName = body.value("model_name", "resnet50");
+
+        // Get the ModelPipeline for this model
+        auto engine = modelFactory_->getModel(modelName);
+        if (!engine) {
+            nlohmann::json err;
+            err["status"] = "error";
+            err["message"] = "unknown model: " + modelName;
+            std::string s = err.dump();
+            resp->setStatusCode(http::HttpResponse::k400BadRequest);
+            resp->setStatusMessage("Bad Request");
+            resp->setContentType("application/json");
+            resp->setContentLength(s.size());
+            resp->setBody(std::move(s));
+            resp->setCloseConnection(true);
+            return;
+        }
+
+        // Cast to ModelPipeline to access predictTensor()
+        auto* pipeline = dynamic_cast<inference::ModelPipeline*>(engine.get());
+        if (!pipeline) {
+            nlohmann::json err;
+            err["status"] = "error";
+            err["message"] = "model is not a ModelPipeline (unexpected)";
+            std::string s = err.dump();
+            resp->setStatusCode(http::HttpResponse::k500InternalServerError);
+            resp->setStatusMessage("Internal Server Error");
+            resp->setContentType("application/json");
+            resp->setContentLength(s.size());
+            resp->setBody(std::move(s));
+            resp->setCloseConnection(true);
+            return;
+        }
+
+        auto inferOut = pipeline->predictTensor(input, inputShape, batchSize);
+
+        // Serialize InferenceOutput as JSON for the remote caller
+        nlohmann::json j;
+        j["status"] = "ok";
+        j["data"]  = inferOut.data;
+        j["shape"] = inferOut.shape;
+        if (!inferOut.shapes.empty())  j["shapes"]  = inferOut.shapes;
+        if (!inferOut.tensors.empty()) j["tensors"] = inferOut.tensors;
+        if (!inferOut.names.empty())   j["names"]   = inferOut.names;
+
+        std::string s = j.dump();
+        resp->setStatusCode(http::HttpResponse::k200Ok);
+        resp->setStatusMessage("OK");
+        resp->setContentType("application/json");
+        resp->setContentLength(s.size());
+        resp->setBody(std::move(s));
+        resp->setCloseConnection(false);
+    }
+    catch (const std::exception& e) {
+        LOG_ERROR << "TensorPredict error: " << e.what();
+        nlohmann::json err;
+        err["status"] = "error";
+        err["message"] = std::string("internal error: ") + e.what();
+        std::string s = err.dump();
+        resp->setStatusCode(http::HttpResponse::k500InternalServerError);
+        resp->setStatusMessage("Internal Server Error");
+        resp->setContentType("application/json");
+        resp->setContentLength(s.size());
+        resp->setBody(std::move(s));
+        resp->setCloseConnection(true);
+    }
 }
 
 void InferenceServer::cleanupStaleSessions()

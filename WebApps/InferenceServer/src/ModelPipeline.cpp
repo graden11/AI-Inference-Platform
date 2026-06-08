@@ -223,4 +223,27 @@ std::vector<std::string> ModelPipeline::predictBatch(
     return results;
 }
 
+InferenceOutput ModelPipeline::predictTensor(const std::vector<float>& input,
+                                              const std::vector<int64_t>& inputShape,
+                                              int batchSize)
+{
+    if (batchSize == 1)
+    {
+        std::vector<int64_t> outShape;
+        auto out = backend_->inferMulti(input, inputShape);
+        // Also run postprocess for consistent output structure
+        auto j = postprocessor_->postprocess(out, labels_);
+        // Wrap in InferenceOutput with the raw data preserved
+        out.shape  = out.shape;
+        return out;
+    }
+    else
+    {
+        auto out = backend_->inferBatchMulti(input, inputShape);
+        auto results = postprocessor_->postprocessBatch(out, batchSize, labels_);
+        out.shape  = out.shape;
+        return out;
+    }
+}
+
 } // namespace inference

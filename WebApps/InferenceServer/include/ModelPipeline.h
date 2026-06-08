@@ -41,6 +41,12 @@ public:
     const ModelConfig& config() const { return config_; }
     const std::vector<std::string>& labels() const { return labels_; }
 
+    /// Direct tensor-in / tensor-out — used by the /predict/tensor endpoint
+    /// on the GPU side to serve preprocessed tensors from a remote cloud server.
+    InferenceOutput predictTensor(const std::vector<float>& input,
+                                  const std::vector<int64_t>& inputShape,
+                                  int batchSize);
+
 private:
     nlohmann::json doPredictJson(const std::vector<uint8_t>& imageBytes);
 

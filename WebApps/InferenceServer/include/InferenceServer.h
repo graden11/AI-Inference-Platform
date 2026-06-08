@@ -86,6 +86,10 @@ private:
 
     void getBackendData(const http::HttpRequest& req, http::HttpResponse* resp);
 
+    /// GPU-side tensor endpoint — called by RemoteBackend on the cloud server.
+    /// Accepts preprocessed float tensors, runs inference, returns raw output.
+    void handleTensorPredict(const http::HttpRequest& req, http::HttpResponse* resp);
+
     void packageResp(const std::string& version, http::HttpResponse::HttpStatusCode statusCode,
                      const std::string& statusMsg, bool close, const std::string& contentType,
                      int contentLen, const std::string& body, http::HttpResponse* resp);

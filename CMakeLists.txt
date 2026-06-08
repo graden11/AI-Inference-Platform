@@ -129,6 +129,7 @@ target_link_libraries(simple_server
     crypto
     crypt
     protobuf
+    curl
     ${PROJECT_SOURCE_DIR}/third_party/onnxruntime/lib/libonnxruntime.so
     /usr/lib/x86_64-linux-gnu/libfmt.so
 )
