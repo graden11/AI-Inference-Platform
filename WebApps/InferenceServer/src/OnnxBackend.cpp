@@ -37,12 +37,15 @@ OnnxBackend::OnnxBackend(const ModelConfig& config)
     auto inputTensorInfo = inputTypeInfo.GetTensorTypeAndShapeInfo();
     auto inputShape = inputTensorInfo.GetShape();
 
-    // If the ONNX model has a fixed batch dimension (e.g. 1 for squeezenet),
-    // cap maxBatchSize_ so that ModelPipeline::predictBatch knows to fall back
-    // to per-sample inference instead of passing N>1 to session_->Run().
+    // If the ONNX model has a fixed batch dimension (shape[0] > 0, e.g. 1 for
+    // squeezenet or yolo exported with explicit batch=1), cap maxBatchSize_ so
+    // that ModelPipeline::predictBatch falls back to per-sample inference
+    // instead of passing N>1 to session_->Run() and hitting a dimension error.
+    // Dynamic-batch models have shape[0] == -1 or 0 and are not capped.
     if (!inputShape.empty() && inputShape[0] > 0) {
-        maxBatchSize_ = std::min(maxBatchSize_, static_cast<int>(inputShape[0]));
-        LOG_INFO << "OnnxBackend: static batch dim = " << inputShape[0]
+        int staticBatch = static_cast<int>(inputShape[0]);
+        maxBatchSize_ = std::min(maxBatchSize_, staticBatch);
+        LOG_INFO << "OnnxBackend: static batch dim = " << staticBatch
                  << " (maxBatchSize capped to " << maxBatchSize_ << ")";
     }
 
