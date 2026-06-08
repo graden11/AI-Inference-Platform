@@ -86,10 +86,10 @@
       "nms_threshold": 0.44999998807907104,
       "output_layout": "chw",
       "output_name": "output",
-      "path": "models/resnet50_int8.engine",
+      "path": "http://127.0.0.1:9080",
       "task": "classification",
       "top_k": 5,
-      "type": "tensorrt",
+      "type": "remote",
       "version": "1"
     },
     {
@@ -144,10 +144,10 @@
       "nms_threshold": 0.44999998807907104,
       "output_layout": "chw",
       "output_name": "output",
-      "path": "models/resnet50_classification.engine",
+      "path": "http://127.0.0.1:9080",
       "task": "classification",
       "top_k": 5,
-      "type": "tensorrt",
+      "type": "remote",
       "version": "1"
     },
     {
@@ -232,10 +232,10 @@
         "output": {
           "name": "output"
         },
-        "path": "models/resnet50_int8.engine",
+        "path": "http://127.0.0.1:9080",
         "task": "classification",
         "top_k": 5,
-        "type": "tensorrt",
+        "type": "remote",
         "version": "1"
       },
       "resnet50_trt": {
@@ -258,10 +258,10 @@
         "output": {
           "name": "output"
         },
-        "path": "models/resnet50_classification.engine",
+        "path": "http://127.0.0.1:9080",
         "task": "classification",
         "top_k": 5,
-        "type": "tensorrt",
+        "type": "remote",
         "version": "1"
       }
     },
