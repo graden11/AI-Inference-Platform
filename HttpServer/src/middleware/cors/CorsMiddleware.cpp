@@ -19,6 +19,8 @@ void CorsMiddleware::before(HttpRequest& request)
     {
         LOG_INFO << "Processing CORS preflight request";
         HttpResponse response;
+        response.setVersion(request.getVersion());
+        response.setCloseConnection(false);
         handlePreflightRequest(request, response);
         throw response;
     }

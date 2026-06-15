@@ -189,9 +189,31 @@ void InferenceServer::initialize()
         modelFactory_->registerModel(name, version, pipeline, type, path);
     };
 
-    // Models are NOT loaded at startup — users load them manually via /models/load.
-    // This keeps container restart near-instant (~0.2s instead of ~50s).
-    // Model definitions remain in config for the frontend to display as available.
+    // ── Restore dynamic engines on startup ──
+    // Models that were loaded via /models/load are persisted in dynamic_engines.
+    // Starting with them loaded means /models and /predict/batch work immediately.
+    if (config_.restore_dynamic_on_startup && !config_.dynamic_engines.empty())
+    {
+        int success = 0, failed = 0;
+        spdlog::info("Restoring {} dynamic models from config...", config_.dynamic_engines.size());
+        for (const auto& entry : config_.dynamic_engines)
+        {
+            try {
+                loadModel(entry.name, entry.version, entry.type, entry.path,
+                          entry.task, entry.labels, entry.top_k,
+                          entry.input_width, entry.input_height, entry.input_channels,
+                          entry.input_name, entry.output_name,
+                          entry.input_mean, entry.input_std,
+                          entry.input_layout, entry.output_layout);
+                success++;
+                spdlog::info("  Restored: {}:{} type={}", entry.name, entry.version, entry.type);
+            } catch (const std::exception& e) {
+                failed++;
+                spdlog::error("  Failed to restore {}:{}: {}", entry.name, entry.version, e.what());
+            }
+        }
+        spdlog::info("Dynamic model restore: success={}, failed={}", success, failed);
+    }
 
     initializeRouter();
 }
@@ -268,7 +290,7 @@ void InferenceServer::initializeRouter()
 
     httpServer_.Post("/predict", std::make_shared<PredictHandler>(modelFactory_.get(), batcher_.get(), slotPool_.get()));
     httpServer_.Post("/predict/raw", std::make_shared<RawPredictHandler>(modelFactory_.get(), batcher_.get(), slotPool_.get()));
-    httpServer_.Post("/predict/batch", std::make_shared<BatchPredictHandler>(modelFactory_.get()));
+    httpServer_.Post("/predict/batch", std::make_shared<BatchPredictHandler>(modelFactory_.get(), batcher_.get(), slotPool_.get()));
     httpServer_.Post("/predict/proto", std::make_shared<ProtoPredictHandler>(modelFactory_.get()));
     httpServer_.Get("/metrics", std::make_shared<MetricsHandler>());
     httpServer_.Get("/metrics/json", std::make_shared<MetricsHandler>());

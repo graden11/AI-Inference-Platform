@@ -149,6 +149,7 @@ struct AppConfig {
     BatchingConfig batching;
     LoggingConfig logging;
     std::string labels_path;
+    bool restore_dynamic_on_startup = true;
     std::unordered_map<std::string, ModelEntryConfig> models;
     std::vector<DynamicModelEntry> dynamic_engines;
     Recommendations recommendations;
@@ -234,6 +235,8 @@ inline AppConfig loadConfig(const std::string &filePath)
     if (j.contains("models"))
     {
         auto &m = j["models"];
+        if (m.contains("restore_dynamic_on_startup"))
+            cfg.restore_dynamic_on_startup = m["restore_dynamic_on_startup"].get<bool>();
         // Support both old "labels_path" and new "global_labels_path"
         if (m.contains("labels_path"))
             cfg.labels_path = m["labels_path"].get<std::string>();

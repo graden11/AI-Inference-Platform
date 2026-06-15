@@ -1,12 +1,20 @@
 #include "../../include/handlers/BatchPredictHandler.h"
 #include "../../include/ModelFactory.h"
 #include "../../include/InferenceEngine.h"
+#include "../../include/RequestBatcher.h"
+#include "../../include/RequestSlotPool.h"
 
-#include <muduo/base/Logging.h>
-
+#include "../../../../HttpServer/include/http/HttpResponse.h"
 #include "../../../../HttpServer/include/utils/JsonUtil.h"
 #include "../../../../HttpServer/include/utils/PathValidator.h"
 #include "../../../../HttpServer/include/utils/Base64.h"
+#include "../../../../HttpServer/include/utils/MetricsCollector.h"
+
+#include <chrono>
+#include <future>
+#include <thread>
+#include <muduo/base/Logging.h>
+#include <muduo/net/EventLoop.h>
 
 #include <fstream>
 #include <utility>
@@ -16,18 +24,6 @@ namespace
 {
 
 const std::vector<std::string> kAllowedReadDirs = {"models", "images"};
-
-std::vector<uint8_t> readFile(const std::string &path)
-{
-    std::ifstream f(path, std::ios::binary | std::ios::ate);
-    if (!f)
-        return {};
-    auto size = f.tellg();
-    f.seekg(0, std::ios::beg);
-    std::vector<uint8_t> data(static_cast<size_t>(size));
-    f.read(reinterpret_cast<char *>(data.data()), size);
-    return data;
-}
 
 void sendError(const http::HttpRequest &req, http::HttpResponse *resp,
                http::HttpResponse::HttpStatusCode code,
@@ -42,7 +38,7 @@ void sendError(const http::HttpRequest &req, http::HttpResponse *resp,
     resp->setContentType("application/json");
     resp->setContentLength(body.size());
     resp->setBody(std::move(body));
-    resp->setCloseConnection(false);
+    resp->setCloseConnection(code != http::HttpResponse::k200Ok);
 }
 
 } // anonymous namespace
@@ -72,6 +68,7 @@ void BatchPredictHandler::handle(const http::HttpRequest &req, http::HttpRespons
 
         std::string modelName = body.value("model_name", "resnet50");
 
+        // ── Check model exists ──
         auto engine = factory_->getModel(modelName);
         if (!engine)
         {
@@ -80,7 +77,20 @@ void BatchPredictHandler::handle(const http::HttpRequest &req, http::HttpRespons
             return;
         }
 
-        std::vector<std::vector<uint8_t>> imageBytes;
+        // ── Decode all images into slots ──
+        std::vector<std::shared_ptr<RequestSlot>> slots;
+        std::vector<std::future<std::string>> futures;
+
+        auto submitImage = [&](std::vector<uint8_t> imageBytes) -> bool {
+            auto slot = slotPool_ ? slotPool_->acquire() : nullptr;
+            if (!slot)
+                slot = std::make_shared<RequestSlot>();
+            slot->imageBytes = std::move(imageBytes);
+            auto future = batcher_->submit(modelName, slot);
+            futures.push_back(std::move(future));
+            slots.push_back(std::move(slot));
+            return true;
+        };
 
         if (hasPaths)
         {
@@ -91,7 +101,6 @@ void BatchPredictHandler::handle(const http::HttpRequest &req, http::HttpRespons
                           "'image_paths' must be a non-empty array");
                 return;
             }
-            imageBytes.reserve(paths.size());
 
             for (auto &p : paths)
             {
@@ -102,14 +111,18 @@ void BatchPredictHandler::handle(const http::HttpRequest &req, http::HttpRespons
                               "image_path is outside allowed directories: " + pathStr);
                     return;
                 }
-                auto data = readFile(pathStr);
-                if (data.empty())
+                std::ifstream f(pathStr, std::ios::binary | std::ios::ate);
+                if (!f)
                 {
                     sendError(req, resp, http::HttpResponse::k400BadRequest,
                               "failed to read image: " + pathStr);
                     return;
                 }
-                imageBytes.push_back(std::move(data));
+                auto size = f.tellg();
+                f.seekg(0, std::ios::beg);
+                std::vector<uint8_t> data(static_cast<size_t>(size));
+                f.read(reinterpret_cast<char *>(data.data()), size);
+                submitImage(std::move(data));
             }
         }
         else
@@ -121,7 +134,6 @@ void BatchPredictHandler::handle(const http::HttpRequest &req, http::HttpRespons
                           "'images' must be a non-empty array");
                 return;
             }
-            imageBytes.reserve(images.size());
 
             for (auto &img : images)
             {
@@ -133,48 +145,83 @@ void BatchPredictHandler::handle(const http::HttpRequest &req, http::HttpRespons
                               "failed to decode base64 image at index");
                     return;
                 }
-                imageBytes.push_back(std::move(data));
+                submitImage(std::move(data));
             }
         }
 
-        std::vector<std::string> resultJsons;
-        try
-        {
-            resultJsons = engine->predictBatch(imageBytes);
-        }
-        catch (const std::exception &e)
-        {
-            LOG_ERROR << "BatchPredictHandler predictBatch error: " << e.what();
-            sendError(req, resp, http::HttpResponse::k500InternalServerError,
-                      std::string("inference error: ") + e.what());
-            return;
-        }
+        // ── Async deferred response ──
+        int count = static_cast<int>(slots.size());
 
-        json response;
-        response["status"] = "ok";
-        response["model_name"] = modelName;
-        response["count"] = static_cast<int>(resultJsons.size());
+        resp->setDeferred(true);
+        auto conn = resp->getTcpConnection();
+        auto version = req.getVersion();
+        auto complete = resp->takeCompleteCallback();
+        auto perfTrace = resp->getPerfTrace();
 
-        json results = json::array();
-        for (auto &r : resultJsons)
-        {
-            try
+        std::thread([conn = std::move(conn),
+                     version = std::move(version),
+                     modelName = std::move(modelName),
+                     count,
+                     futures = std::move(futures),
+                     slots = std::move(slots),
+                     perfTrace = std::move(perfTrace),
+                     complete = std::move(complete)]() mutable {
+            json response;
+            response["status"] = "ok";
+            response["model_name"] = modelName;
+            response["count"] = count;
+
+            json results = json::array();
+            for (int i = 0; i < count; ++i)
             {
-                results.push_back(json::parse(r));
+                try
+                {
+                    futures[i].get();  // synchronize with batcher dispatch
+                    std::string resultJson = slots[i] ? std::move(slots[i]->resultJson) : "{}";
+                    try
+                    {
+                        results.push_back(json::parse(resultJson));
+                    }
+                    catch (...)
+                    {
+                        json wrapper;
+                        wrapper["status"] = "error";
+                        wrapper["message"] = resultJson;
+                        results.push_back(wrapper);
+                    }
+                }
+                catch (const std::exception& e)
+                {
+                    json err;
+                    err["status"] = "error";
+                    err["message"] = std::string("batch inference failed: ") + e.what();
+                    results.push_back(err);
+                }
             }
-            catch (...)
-            {
-                results.push_back(r);
-            }
-        }
-        response["results"] = results;
+            response["results"] = results;
 
-        std::string respBody = response.dump();
-        resp->setStatusLine(req.getVersion(), http::HttpResponse::k200Ok, "OK");
-        resp->setContentType("application/json");
-        resp->setContentLength(respBody.size());
-        resp->setBody(std::move(respBody));
-        resp->setCloseConnection(false);
+            std::string respBody = response.dump();
+
+            auto buf = std::make_shared<muduo::net::Buffer>();
+            {
+                http::HttpResponse r(false);
+                r.setStatusLine(version, http::HttpResponse::k200Ok, "OK");
+                r.setContentType("application/json");
+                r.setContentLength(respBody.size());
+                r.setBody(std::move(respBody));
+                r.setPerfTrace(perfTrace);
+                r.appendToBuffer(buf.get());
+            }
+
+            conn->getLoop()->runInLoop([conn, buf]() {
+                conn->send(buf.get());
+            });
+
+            if (perfTrace)
+                perfTrace->dump(100);
+
+            complete();
+        }).detach();
     }
     catch (const json::exception &e)
     {
@@ -191,7 +238,6 @@ void BatchPredictHandler::handle(const http::HttpRequest &req, http::HttpRespons
     catch (...)
     {
         LOG_ERROR << "BatchPredictHandler unknown error";
-        sendError(req, resp, http::HttpResponse::k500InternalServerError,
-                  "internal error");
+        sendError(req, resp, http::HttpResponse::k500InternalServerError, "internal error");
     }
 }

@@ -865,19 +865,113 @@ uploadBtn.addEventListener('click', function() {
   var files = fileInput.files;
   if (files.length === 0) return;
   var modelName = document.getElementById('model-select').value;
+  if (!modelName) {
+    alert('请先加载一个模型');
+    return;
+  }
   uploadBtn.disabled = true;
   hint.style.display = 'block';
   results.style.display = 'none';
 
-  var loaded = 0, images = [];
+  var RAW_BODY_LIMIT = 900 * 1024;
+  var RAW_MAX_PARALLEL = 4;
 
-  function submitBatch() {
-    fetch('/predict/batch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ images: images, model_name: modelName })
-    })
-    .then(function(r) { return r.json(); })
+  function compressForRawUpload(file) {
+    if (file.size <= RAW_BODY_LIMIT) {
+      return Promise.resolve(file);
+    }
+
+    return new Promise(function(resolve, reject) {
+      var img = new Image();
+      var url = URL.createObjectURL(file);
+      img.onload = function() {
+        URL.revokeObjectURL(url);
+        var maxSide = 1280;
+        var scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+        var canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        var ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        function encode(quality) {
+          canvas.toBlob(function(blob) {
+            if (!blob) {
+              reject(new Error('image encode failed'));
+              return;
+            }
+            if (blob.size <= RAW_BODY_LIMIT || quality <= 0.55) {
+              resolve(blob);
+              return;
+            }
+            encode(quality - 0.1);
+          }, 'image/jpeg', quality);
+        }
+        encode(0.85);
+      };
+      img.onerror = function() {
+        URL.revokeObjectURL(url);
+        reject(new Error('image decode failed'));
+      };
+      img.src = url;
+    });
+  }
+
+  function predictOneRaw(file) {
+    return compressForRawUpload(file)
+      .then(function(blob) {
+        return fetch('/predict/raw?model_name=' + encodeURIComponent(modelName), {
+          method: 'POST',
+          headers: { 'Content-Type': blob.type || file.type || 'image/jpeg' },
+          body: blob
+        });
+      })
+      .then(function(r) {
+        return r.json().then(function(d) {
+          if (!r.ok) {
+            return { status: 'error', message: d.message || ('HTTP ' + r.status) };
+          }
+          return d;
+        }).catch(function() {
+          return { status: 'error', message: 'invalid response: HTTP ' + r.status };
+        });
+      })
+      .catch(function(e) {
+        return { status: 'error', message: e.message || 'request failed' };
+      });
+  }
+
+  function submitRawBatch() {
+    var output = new Array(files.length);
+    var next = 0;
+    var active = 0;
+    var done = 0;
+
+    return new Promise(function(resolve) {
+      function pump() {
+        while (active < RAW_MAX_PARALLEL && next < files.length) {
+          (function(idx) {
+            active++;
+            predictOneRaw(files[idx]).then(function(result) {
+              output[idx] = result;
+            }).finally(function() {
+              active--;
+              done++;
+              hint.textContent = '推理中... ' + done + '/' + files.length;
+              if (done === files.length) {
+                resolve({ status: 'ok', count: files.length, results: output });
+              } else {
+                pump();
+              }
+            });
+          })(next++);
+        }
+      }
+      pump();
+    });
+  }
+
+  submitRawBatch()
     .then(function(data) {
       hint.style.display = 'none';
       uploadBtn.disabled = false;
@@ -948,25 +1042,18 @@ uploadBtn.addEventListener('click', function() {
       }
       results.style.display = 'block';
     })
-    .catch(function() {
+    .catch(function(e) {
       hint.style.display = 'none';
       uploadBtn.disabled = false;
-      results.innerHTML = '<h3>推理结果</h3><p style="color:var(--color-error)">网络错误</p>';
+      var msg = '网络错误';
+      if (e.message && e.message.startsWith('backend:')) {
+        msg = '推理失败: ' + e.message.slice(8);
+      } else if (e.message) {
+        msg = '网络错误: ' + e.message;
+      }
+      results.innerHTML = '<h3>推理结果</h3><p style="color:var(--color-error)">' + msg + '</p>';
       results.style.display = 'block';
     });
-  }
-
-  for (var i = 0; i < files.length; i++) {
-    (function(file) {
-      var reader = new FileReader();
-      reader.onload = function() {
-        images.push(reader.result.split(',')[1]);
-        loaded++;
-        if (loaded === files.length) submitBatch();
-      };
-      reader.readAsDataURL(file);
-    })(files[i]);
-  }
 });
 </script>
 
