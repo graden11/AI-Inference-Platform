@@ -1,7 +1,7 @@
 #include "../../include/handlers/PredictHandler.h"
 #include "../../include/ModelFactory.h"
 #include "../../include/InferenceEngine.h"
-#include "../../include/RequestBatcher.h"
+#include "../../include/DynamicBatchScheduler.h"
 #include "../../include/RequestSlotPool.h"
 
 #include "../../../../HttpServer/include/http/HttpResponse.h"
@@ -87,6 +87,15 @@ void PredictHandler::handle(const http::HttpRequest &req, http::HttpResponse *re
         // Batching path
         if (batcher_)
         {
+            // Validate model exists BEFORE submitting to scheduler
+            auto engine = factory_->getModel(modelName);
+            if (!engine)
+            {
+                sendPredictError(req, resp, http::HttpResponse::k400BadRequest,
+                                 "unknown model: " + modelName);
+                return;
+            }
+
             // Decode image bytes into slot (or temp if pool exhausted)
             if (slot)
             {
@@ -183,6 +192,7 @@ void PredictHandler::handle(const http::HttpRequest &req, http::HttpResponse *re
 
             // ── Phase 3: Async response — don't block IO thread ──
             resp->setDeferred(true);
+            bool keepAlive = !resp->closeConnection();
             auto conn = resp->getTcpConnection();
             auto version = req.getVersion();
             auto complete = resp->takeCompleteCallback();
@@ -192,6 +202,7 @@ void PredictHandler::handle(const http::HttpRequest &req, http::HttpResponse *re
                          version = std::move(version),
                          future = std::move(future),
                          slot,     // keep slot alive until response is sent
+                         keepAlive,
                          perfTrace = std::move(perfTrace),
                          complete = std::move(complete)]() mutable {
                 // Wait for inference to complete (promise signals "ok")
@@ -232,6 +243,13 @@ void PredictHandler::handle(const http::HttpRequest &req, http::HttpResponse *re
 
                 if (perfTrace)
                     perfTrace->dump(100);
+
+                if (!keepAlive)
+                {
+                    conn->getLoop()->runAfter(0.01, [conn]() {
+                        conn->shutdown();
+                    });
+                }
 
                 complete();
                 // slot shared_ptr drops here → returned to pool

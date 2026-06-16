@@ -1,7 +1,7 @@
 #include "../../include/handlers/RawPredictHandler.h"
 #include "../../include/ModelFactory.h"
 #include "../../include/InferenceEngine.h"
-#include "../../include/RequestBatcher.h"
+#include "../../include/DynamicBatchScheduler.h"
 #include "../../include/RequestSlotPool.h"
 
 #include "../../../../HttpServer/include/http/HttpResponse.h"
@@ -38,6 +38,12 @@ void RawPredictHandler::handle(const http::HttpRequest &req, http::HttpResponse 
 {
     try
     {
+        // DEBUG
+        static std::atomic<int> callCount{0};
+        int n = callCount.fetch_add(1);
+        if (n % 10 == 0)
+            LOG_INFO << "RawPredictHandler called #" << n;
+
         std::string modelName = req.getQueryParameters("model_name");
         if (modelName.empty())
             modelName = "resnet50";
@@ -79,6 +85,17 @@ void RawPredictHandler::handle(const http::HttpRequest &req, http::HttpResponse 
         // Batching path
         if (batcher_)
         {
+            // Validate model exists BEFORE submitting to scheduler.
+            // Without this check, every unknown model_name would leak a
+            // permanent queue entry in the scheduler's queues_ map.
+            auto engine = factory_->getModel(modelName);
+            if (!engine)
+            {
+                sendRawError(req, resp, http::HttpResponse::k400BadRequest,
+                             "unknown model: " + modelName);
+                return;
+            }
+
             std::vector<uint8_t> imageBytes;  // fallback
             std::future<std::string> future;
 
@@ -104,7 +121,15 @@ void RawPredictHandler::handle(const http::HttpRequest &req, http::HttpResponse 
             }
 
             // ── Async response — don't block IO thread ──
+            // Shallow-copy the response's closeConnection() decision so the
+            // async lambda can honour it.  The deferred path skips
+            // HttpServer::onRequest's normal close/shutdown logic, so the
+            // lambda must do it itself.  Without this, Keep-Alive is
+            // silently broken: every deferred response leaves the connection
+            // without a Content-Length→closeConnection=true and muduo tears
+            // it down, so the client never reuses it.
             resp->setDeferred(true);
+            bool keepAlive = !resp->closeConnection();  // capture BEFORE moving conn
             auto conn = resp->getTcpConnection();
             auto version = req.getVersion();
             auto complete = resp->takeCompleteCallback();
@@ -114,6 +139,7 @@ void RawPredictHandler::handle(const http::HttpRequest &req, http::HttpResponse 
                          version = std::move(version),
                          future = std::move(future),
                          slot,     // keep slot alive
+                         keepAlive,
                          perfTrace = std::move(perfTrace),
                          complete = std::move(complete)]() mutable {
                 std::string resultJson;
@@ -153,6 +179,16 @@ void RawPredictHandler::handle(const http::HttpRequest &req, http::HttpResponse 
 
                 if (perfTrace)
                     perfTrace->dump(100);
+
+                // Honour Keep-Alive: if the request indicated keep-alive,
+                // the response has Content-Length and we must NOT shut down.
+                // Conversely, if closeConnection() was true, close cleanly.
+                if (!keepAlive)
+                {
+                    conn->getLoop()->runAfter(0.01, [conn]() {
+                        conn->shutdown();
+                    });
+                }
 
                 complete();
                 // slot shared_ptr drops here → returned to pool

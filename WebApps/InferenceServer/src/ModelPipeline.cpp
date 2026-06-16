@@ -194,10 +194,14 @@ std::vector<std::string> ModelPipeline::predictBatch(
     thread_local std::vector<float> batchInput;
 
     std::vector<std::string> results;
+    std::string taskStr = taskTypeToString(config_.task);
+
     for (int start = 0; start < batchSize; start += maxBatch)
     {
         int chunk = std::min(maxBatch, batchSize - start);
         batchInput.assign(chunk * perSampleElems, 0.0f);
+
+        PhaseTimer timer(config_.name, taskStr);
 
         // ── Phase 5: Parallel preprocessing using thread pool ──
         if (preprocessPool_ && chunk > 1)
@@ -243,8 +247,14 @@ std::vector<std::string> ModelPipeline::predictBatch(
             isHWC ? config_.input.preferred_width  : config_.input.preferred_height,
             isHWC ? config_.input.channels         : config_.input.preferred_width
         };
+        timer.record("preprocess");
+
         auto batchIO = backend_->inferBatchMulti(batchInput, chunkShape);
+        int64_t inferElapsed = timer.record("inference");
+        MetricsCollector::instance().recordModelLatency(config_.name, taskStr, inferElapsed, chunk);
+
         auto resultsJson = postprocessor_->postprocessBatch(batchIO, chunk, labels_);
+        timer.record("postprocess");
 
         for (auto& j : resultsJson)
             results.push_back(j.dump());

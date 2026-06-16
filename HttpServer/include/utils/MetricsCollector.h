@@ -60,6 +60,31 @@ struct BatchMetrics {
     std::atomic<int64_t> queue_wait_us_sum{0};
     std::atomic<int64_t> queue_wait_us_max{0};
     std::atomic<int64_t> queue_wait_us_min{INT64_MAX};
+
+    // ── Executor queue wait (B4 - B3): time spent waiting in InferenceExecutor queue ──
+    std::atomic<int64_t> exec_queue_wait_us_sum{0};
+    std::atomic<int64_t> exec_queue_wait_us_max{0};
+    std::atomic<int64_t> exec_queue_wait_us_min{INT64_MAX};
+
+    // ── Dispatch reason distribution ──
+    std::atomic<int64_t> reason_preferred{0};
+    std::atomic<int64_t> reason_timeout{0};
+    std::atomic<int64_t> reason_max_batch{0};
+    std::atomic<int64_t> reason_shutdown{0};
+
+    // ── Queue depth sampling ──
+    std::atomic<int64_t> queue_depth_samples{0};
+    std::atomic<int64_t> queue_depth_sum{0};
+
+    // ── Batch size histogram (buckets: 1, 2, 4, 8, 16, 32, 64, >64) ──
+    std::atomic<int64_t> bs_1{0};
+    std::atomic<int64_t> bs_2{0};
+    std::atomic<int64_t> bs_4{0};
+    std::atomic<int64_t> bs_8{0};
+    std::atomic<int64_t> bs_16{0};
+    std::atomic<int64_t> bs_32{0};
+    std::atomic<int64_t> bs_64{0};
+    std::atomic<int64_t> bs_gt64{0};
 };
 
 class MetricsCollector
@@ -106,6 +131,58 @@ public:
         while (queueWaitUs > oldMax &&
                !m.queue_wait_us_max.compare_exchange_weak(oldMax, queueWaitUs, std::memory_order_relaxed))
             ;
+    }
+
+    /// Record batch dispatch reason + batch size histogram.
+    void recordBatchDispatch(const std::string& model,
+                              const std::string& reason,
+                              int batchSize)
+    {
+        auto &m = getOrCreateBatch(model);
+
+        // Dispatch reason
+        if (reason == "preferred")
+            m.reason_preferred.fetch_add(1, std::memory_order_relaxed);
+        else if (reason == "timeout")
+            m.reason_timeout.fetch_add(1, std::memory_order_relaxed);
+        else if (reason == "max_batch")
+            m.reason_max_batch.fetch_add(1, std::memory_order_relaxed);
+        else if (reason == "shutdown")
+            m.reason_shutdown.fetch_add(1, std::memory_order_relaxed);
+
+        // Batch size histogram
+        auto &bsBucket = (batchSize <= 1)  ? m.bs_1 :
+                         (batchSize <= 2)  ? m.bs_2 :
+                         (batchSize <= 4)  ? m.bs_4 :
+                         (batchSize <= 8)  ? m.bs_8 :
+                         (batchSize <= 16) ? m.bs_16 :
+                         (batchSize <= 32) ? m.bs_32 :
+                         (batchSize <= 64) ? m.bs_64 :
+                                             m.bs_gt64;
+        bsBucket.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    /// Record executor queue wait for a batch (time from B3 dispatch to B4 predict_begin).
+    void recordBatchExecutorQueueWait(const std::string& model, int64_t waitUs)
+    {
+        auto &m = getOrCreateBatch(model);
+        m.exec_queue_wait_us_sum.fetch_add(waitUs, std::memory_order_relaxed);
+        int64_t oldMin = m.exec_queue_wait_us_min.load(std::memory_order_relaxed);
+        while (waitUs < oldMin &&
+               !m.exec_queue_wait_us_min.compare_exchange_weak(oldMin, waitUs, std::memory_order_relaxed))
+            ;
+        int64_t oldMax = m.exec_queue_wait_us_max.load(std::memory_order_relaxed);
+        while (waitUs > oldMax &&
+               !m.exec_queue_wait_us_max.compare_exchange_weak(oldMax, waitUs, std::memory_order_relaxed))
+            ;
+    }
+
+    /// Record queue depth sample (call from schedulerLoop periodically).
+    void recordQueueDepth(const std::string& model, int depth)
+    {
+        auto &m = getOrCreateBatch(model);
+        m.queue_depth_samples.fetch_add(1, std::memory_order_relaxed);
+        m.queue_depth_sum.fetch_add(depth, std::memory_order_relaxed);
     }
 
     void setInflightSource(const std::atomic<int>* src) { inflightSrc_ = src; }
@@ -286,6 +363,41 @@ public:
             int64_t minVal = m.queue_wait_us_min.load(std::memory_order_relaxed);
             bm["queue_wait_us_min"] = (minVal == INT64_MAX) ? 0 : minVal;
             bm["queue_wait_us_max"] = m.queue_wait_us_max.load(std::memory_order_relaxed);
+
+            int64_t execMinVal = m.exec_queue_wait_us_min.load(std::memory_order_relaxed);
+            bm["exec_queue_wait_us_min"] = (execMinVal == INT64_MAX) ? 0 : execMinVal;
+            bm["exec_queue_wait_us_max"] = m.exec_queue_wait_us_max.load(std::memory_order_relaxed);
+            int64_t nb2 = m.batches_total.load(std::memory_order_relaxed);
+            bm["avg_exec_queue_wait_us"] = nb2 > 0
+                ? static_cast<double>(m.exec_queue_wait_us_sum.load(std::memory_order_relaxed)) / nb2
+                : 0.0;
+
+            // ── New dispatch reason distribution ──
+            nlohmann::json reasons;
+            reasons["preferred"]  = m.reason_preferred.load(std::memory_order_relaxed);
+            reasons["timeout"]    = m.reason_timeout.load(std::memory_order_relaxed);
+            reasons["max_batch"]  = m.reason_max_batch.load(std::memory_order_relaxed);
+            reasons["shutdown"]   = m.reason_shutdown.load(std::memory_order_relaxed);
+            bm["dispatch_reasons"] = reasons;
+
+            // ── Batch size histogram ──
+            nlohmann::json bsHist;
+            bsHist["1"]     = m.bs_1.load(std::memory_order_relaxed);
+            bsHist["2"]     = m.bs_2.load(std::memory_order_relaxed);
+            bsHist["4"]     = m.bs_4.load(std::memory_order_relaxed);
+            bsHist["8"]     = m.bs_8.load(std::memory_order_relaxed);
+            bsHist["16"]    = m.bs_16.load(std::memory_order_relaxed);
+            bsHist["32"]    = m.bs_32.load(std::memory_order_relaxed);
+            bsHist["64"]    = m.bs_64.load(std::memory_order_relaxed);
+            bsHist[">64"]   = m.bs_gt64.load(std::memory_order_relaxed);
+            bm["batch_size_histogram"] = bsHist;
+
+            // ── Queue depth ──
+            int64_t qds = m.queue_depth_samples.load(std::memory_order_relaxed);
+            bm["avg_queue_depth"] = qds > 0
+                ? static_cast<double>(m.queue_depth_sum.load(std::memory_order_relaxed)) / qds
+                : 0.0;
+
             bat[model] = bm;
         }
         j["batching"] = bat;

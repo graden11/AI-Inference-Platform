@@ -94,10 +94,32 @@ struct RedisConfig {
     int pool_size = 5;
 };
 
+/// Per-model batching override.  Zero/empty fields inherit from the
+/// global BatchingConfig default below.
+struct PerModelBatchingConfig {
+    int max_batch_size = 0;                       // 0 = inherit
+    std::vector<int> preferred_batch_sizes;       // empty = inherit
+    int max_queue_delay_us = 0;                   // 0 = inherit
+};
+
 struct BatchingConfig {
     bool enabled = false;
+
+    // ── Legacy fields (kept for backward compatibility) ──
     int max_batch_size = 8;
     int max_delay_ms = 10;
+
+    // ── New Triton-style dynamic batching fields ──
+    std::vector<int> preferred_batch_sizes;       // e.g. [4, 8, 16]
+    int max_queue_delay_us = 5000;                // deadline fallback (us)
+    int max_queue_size = 1024;                    // per-model-queue cap; 0=unlimited
+
+    // ── Explicit-set tracking (for backward compat with max_delay_ms) ──
+    bool max_queue_delay_us_explicit = false;
+    bool preferred_batch_sizes_explicit = false;
+
+    /// Per-model overrides. Key = model name (without version).
+    std::unordered_map<std::string, PerModelBatchingConfig> models;
 };
 
 struct LoggingConfig {
@@ -111,10 +133,12 @@ struct RecommendationParams {
     int  server_threads = 0;
     int  max_batch_size = 0;
     int  max_delay_ms = 0;
+    int  max_queue_delay_us = 0;
     int  workspace_mb = 0;
     bool fp16 = false;
     int  rate_limit_req_per_sec = 0;
     int  rate_limit_burst = 0;
+    std::vector<int> preferred_batch_sizes;
 };
 
 struct RecommendationProfile {
@@ -316,6 +340,88 @@ inline AppConfig loadConfig(const std::string &filePath)
             }
             cfg.batching.max_delay_ms = dm;
         }
+
+        // ── New Triton-style fields ──
+        if (b.contains("preferred_batch_sizes") && b["preferred_batch_sizes"].is_array())
+        {
+            cfg.batching.preferred_batch_sizes_explicit = true;
+            for (auto &v : b["preferred_batch_sizes"])
+                cfg.batching.preferred_batch_sizes.push_back(v.get<int>());
+            std::sort(cfg.batching.preferred_batch_sizes.begin(),
+                      cfg.batching.preferred_batch_sizes.end());
+            // Deduplicate
+            cfg.batching.preferred_batch_sizes.erase(
+                std::unique(cfg.batching.preferred_batch_sizes.begin(),
+                            cfg.batching.preferred_batch_sizes.end()),
+                cfg.batching.preferred_batch_sizes.end());
+        }
+        if (b.contains("max_queue_delay_us")) {
+            cfg.batching.max_queue_delay_us_explicit = true;
+            int d = b["max_queue_delay_us"].get<int>();
+            if (d < 0) d = 0;
+            cfg.batching.max_queue_delay_us = d;
+        }
+        if (b.contains("max_queue_size")) {
+            cfg.batching.max_queue_size = b["max_queue_size"].get<int>();
+        }
+        // Per-model overrides
+        if (b.contains("models") && b["models"].is_object())
+        {
+            for (auto &[name, entry] : b["models"].items())
+            {
+                PerModelBatchingConfig pmc;
+                if (entry.contains("max_batch_size"))
+                    pmc.max_batch_size = entry["max_batch_size"].get<int>();
+                if (entry.contains("preferred_batch_sizes") && entry["preferred_batch_sizes"].is_array())
+                {
+                    for (auto &v : entry["preferred_batch_sizes"])
+                        pmc.preferred_batch_sizes.push_back(v.get<int>());
+                    std::sort(pmc.preferred_batch_sizes.begin(),
+                              pmc.preferred_batch_sizes.end());
+                    pmc.preferred_batch_sizes.erase(
+                        std::unique(pmc.preferred_batch_sizes.begin(),
+                                    pmc.preferred_batch_sizes.end()),
+                        pmc.preferred_batch_sizes.end());
+                }
+                if (entry.contains("max_queue_delay_us"))
+                    pmc.max_queue_delay_us = entry["max_queue_delay_us"].get<int>();
+                cfg.batching.models[name] = pmc;
+            }
+        }
+    }
+
+    // ── Backward compatibility: derive new fields from legacy fields ──
+    // Only auto-derive when the user did NOT explicitly set the new field in JSON.
+    // Previously the check was `<= 0`, which meant the default of 5000 would
+    // shadow a legacy max_delay_ms setting.
+    if (!cfg.batching.max_queue_delay_us_explicit)
+        cfg.batching.max_queue_delay_us = cfg.batching.max_delay_ms * 1000;
+    if (!cfg.batching.preferred_batch_sizes_explicit)
+    {
+        int bs = cfg.batching.max_batch_size;
+        // e.g. bs=16 → [4, 8, 16]; bs=4 → [2, 4]
+        if (bs >= 8)
+            cfg.batching.preferred_batch_sizes = {std::min(4, bs/4), bs/2, bs};
+        else if (bs >= 2)
+            cfg.batching.preferred_batch_sizes = {std::max(1, bs/2), bs};
+        else
+            cfg.batching.preferred_batch_sizes = {1};
+        std::sort(cfg.batching.preferred_batch_sizes.begin(),
+                  cfg.batching.preferred_batch_sizes.end());
+        cfg.batching.preferred_batch_sizes.erase(
+            std::unique(cfg.batching.preferred_batch_sizes.begin(),
+                        cfg.batching.preferred_batch_sizes.end()),
+            cfg.batching.preferred_batch_sizes.end());
+    }
+    // Also derive per-model overrides that use legacy defaults
+    for (auto &[name, pmc] : cfg.batching.models)
+    {
+        if (pmc.max_batch_size <= 0)
+            pmc.max_batch_size = cfg.batching.max_batch_size;
+        if (pmc.max_queue_delay_us <= 0)
+            pmc.max_queue_delay_us = cfg.batching.max_queue_delay_us;
+        if (pmc.preferred_batch_sizes.empty())
+            pmc.preferred_batch_sizes = cfg.batching.preferred_batch_sizes;
     }
 
     // Recommendations (generated by HardwareDetector + ConfigAdvisor on startup)
@@ -354,6 +460,12 @@ inline AppConfig loadConfig(const std::string &filePath)
                     rp.params.fp16               = p.value("fp16", false);
                     rp.params.rate_limit_req_per_sec = p.value("rate_limit_req_per_sec", 0);
                     rp.params.rate_limit_burst    = p.value("rate_limit_burst", 0);
+                    rp.params.max_queue_delay_us  = p.value("max_queue_delay_us", 0);
+                    if (p.contains("preferred_batch_sizes") && p["preferred_batch_sizes"].is_array())
+                    {
+                        for (auto &v : p["preferred_batch_sizes"])
+                            rp.params.preferred_batch_sizes.push_back(v.get<int>());
+                    }
                 }
                 cfg.recommendations.profiles[key] = rp;
             }
