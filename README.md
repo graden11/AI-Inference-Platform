@@ -17,12 +17,12 @@
 ### 1. 获取项目
 
 ```bash
-git clone https://github.com/graden11/webserver.git && cd httpserver
+git clone https://github.com/graden11/AI-Inference-Platform.git && cd httpserver
 ```
 
 ### 2. 放置模型文件
 
-模型文件 **不在 Git 仓库中**（总计 ~470 MB），需放入 `models/`：
+模型文件 **不在 Git 仓库中**，需放入 `models/`：
 
 | 文件 | 大小 | 类型 | 任务 |
 |------|------|------|------|
@@ -36,7 +36,7 @@ git clone https://github.com/graden11/webserver.git && cd httpserver
 | `vision_model.engine` | ~95 MB | TensorRT FP16 | 特征提取 |
 | `imagenet_classes.txt` | ~10 KB | — | ImageNet 1000 类标签 |
 
-> 模型路径前缀（`../WebApps/InferenceServer/models/`→`models/`）在 Docker 构建时自动修正。无 GPU 时仅使用 ONNX 模型。
+> ONNX 模型合计 ~420 MB。TensorRT engine 文件 ~250 MB，仅 GPU 部署需要。模型路径前缀（`../WebApps/InferenceServer/models/`→`models/`）在 Docker 构建时自动修正。
 
 ### 3. 一键启动
 
@@ -98,7 +98,7 @@ curl -s -X POST http://localhost/predict/batch -H 'Content-Type: application/jso
 | - ThreadPool         |
 | - HardwareDetector   |
 | - ConfigAdvisor      |
-| - 16 个 Handler      |
+| - 18 个 Handler      |
 +----------+-----------+    +--------------------------+
            │
            v
@@ -146,6 +146,7 @@ curl -s -X POST http://localhost/predict/batch -H 'Content-Type: application/jso
 | GET | `/health` | — | 存活检查 |
 | GET | `/ready` | — | 就绪检查 |
 | GET | `/system/hardware` | — | 硬件配置 + 推荐 profile |
+| GET | `/system` | — | 系统配置管理页面 |
 | POST | `/system/config/apply` | 是 | 应用 stable / aggressive 配置 |
 | POST | `/system/restart` | 是 | 触发优雅重启 |
 
@@ -366,7 +367,7 @@ curl -X POST http://localhost/predict \
 
 ```json
 {
-  "server": { "port": 80, "threads": 8, "log_level": "WARN", "shutdown_timeout_ms": 30000,
+  "server": { "port": 80, "threads": 8, "log_level": "INFO", "shutdown_timeout_ms": 30000,
               "rate_limit_req_per_sec": 1000, "rate_limit_burst": 2000 },
   "logging": { "level": "INFO", "file": "server.log" },
   "mysql": { "host": "tcp://mysql:3306", "user": "", "password": "", "database": "inference_platform", "pool_size": 10 },
@@ -379,7 +380,7 @@ curl -X POST http://localhost/predict \
 }
 ```
 
-> `server.threads`、`batching.*`、`rate_limit_*` 会由 ConfigAdvisor 在首次启动时自动填入推荐值，并支持运行时通过 `/system/config/apply` 切换。
+> 以上为 `stable` 配置示例。服务器启动时 ConfigAdvisor 会根据硬件自动生成 `stable`（保守）和 `aggressive`（极限）两套 profile，`server.threads`、`batching.*`、`rate_limit_*` 在首次启动时自动填入推荐值，运行中可通过 `/system/config/apply` 切换。
 
 ### 环境变量
 
@@ -476,13 +477,24 @@ curl http://localhost/system/hardware  # 查看硬件配置
 ### 快速开始
 
 ```bash
+# 一键构建 + 启动（推荐）
+./build.sh cpu      # CPU 模式
+./build.sh gpu      # GPU 模式
+
+# 完整部署（含健康检查、模型验证）
+./start.sh cpu      # CPU 部署
+./start.sh gpu      # GPU 部署
+
+# 仅本地编译（不启动 Docker）
+./start.sh --build-only cpu
+
 # 使用开发 Compose（源码挂载，重启即重编译）
 docker compose -f docker-compose.dev.yml up -d --build
 # C++ 改动后无需重建镜像：
 docker compose -f docker-compose.dev.yml restart
 ```
 
-开发容器启动时自动 `cmake .. && make -j$(nproc)`，之后只需 `restart` 就能生效改动。源码全量挂载到容器内 `/project`。
+`build.sh` 是轻量 wrapper（cmake + make → docker compose up），`start.sh` 包含完整流程（检查前置条件 → 验证模型 → 编译 → 启动 Docker → 健康检查）。开发容器启动时自动 `cmake .. && make -j$(nproc)`，之后只需 `restart` 就能生效改动。源码全量挂载到容器内 `/project`。
 
 ### ASAN 调试
 
@@ -496,6 +508,8 @@ cmake .. -DENABLE_TENSORRT=OFF -DENABLE_ASAN=ON && make -j$(nproc)
 | 文档 | 内容 |
 |------|------|
 | [CLAUDE.md](CLAUDE.md) | 构建命令、架构细节、AI 助手使用指南 |
+| [DEVELOPMENT.md](DEVELOPMENT.md) | 项目发展方向与定位 |
+| [AGENTS.md](AGENTS.md) | AI 助手规则 |
 
 ---
 
