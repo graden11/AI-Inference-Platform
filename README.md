@@ -1,8 +1,8 @@
 # AI Inference Platform
 
-基于 muduo 的高性能 C++17 AI 推理服务平台。支持 ONNX Runtime (CPU) 和 TensorRT (GPU) 双后端，6 个模型覆盖分类/检测/分割/特征提取 4 种任务，运行时热加载/热卸载，动态批处理。
+基于 muduo 的高性能 C++17 AI 推理服务平台。支持 ONNX Runtime (CPU) 和 TensorRT (GPU) 双后端，9 个模型覆盖分类/检测/特征提取 3 种任务，运行时热加载/热卸载，动态批处理，自适应硬件配置。
 
-**特性：** 事件驱动架构 · ONNX + TensorRT 双后端 · 分类/检测/分割/特征提取 · 热加载/热卸载 · 请求级动态批处理 · 速率限制 · Prometheus 指标 · 结构化访问日志 · 优雅关闭 · Redis/内存双模式会话
+**特性：** 事件驱动架构 · ONNX + TensorRT 双后端 · 分类/检测/特征提取 · 热加载/热卸载 · 请求级动态批处理 · 自适应硬件配置 · 速率限制 · Prometheus 指标 · 结构化访问日志 · 优雅关闭 · Redis/内存双模式会话
 
 ---
 
@@ -26,16 +26,17 @@ git clone https://github.com/graden11/webserver.git && cd httpserver
 
 | 文件 | 大小 | 类型 | 任务 |
 |------|------|------|------|
+| `resnet50_classification.onnx` | ~97 MB | ONNX | 分类 |
 | `squeezenet1.1-7.onnx` | ~5 MB | ONNX | 分类 |
-| `deeplabv3p-resnet50-human.onnx` | ~47 MB | ONNX | 分割 |
 | `yolov8l.onnx` | ~175 MB | ONNX | 检测 |
 | `vision_model.onnx` | ~143 MB | ONNX | 特征提取 |
 | `resnet50_classification.engine` | ~52 MB | TensorRT FP16 | 分类 |
-| `resnet50_int8.engine` | ~52 MB | TensorRT INT8 | 分类 |
+| `squeezenet1.1-7.engine` | ~5 MB | TensorRT FP16 | 分类 |
+| `yolov8l.engine` | ~97 MB | TensorRT FP16 | 检测 |
+| `vision_model.engine` | ~95 MB | TensorRT FP16 | 特征提取 |
 | `imagenet_classes.txt` | ~10 KB | — | ImageNet 1000 类标签 |
-| `coco_80.txt` | ~0.6 KB | — | COCO 80 类标签（检测用） |
 
-> 如果模型文件缺失，`start.sh` 会给出清晰提示。无 GPU 时仅需 ONNX 模型。
+> 模型路径前缀（`../WebApps/InferenceServer/models/`→`models/`）在 Docker 构建时自动修正。无 GPU 时仅使用 ONNX 模型。
 
 ### 3. 一键启动
 
@@ -43,7 +44,7 @@ git clone https://github.com/graden11/webserver.git && cd httpserver
 # CPU 模式（推荐，兼容所有环境）
 ./start.sh cpu
 
-# GPU 模式（需 NVIDIA GPU + CUDA）
+# GPU 模式（需 NVIDIA GPU + CUDA 12.6）
 ./start.sh gpu
 ```
 
@@ -58,14 +59,14 @@ curl http://localhost/health
 # 查看已加载模型
 curl http://localhost/models | python3 -m json.tool
 
-# 推理测试（分类）
+# 批量推理（两图 base64，推荐方式）
 python3 -c "
 import json,base64
-with open('your_image.jpg','rb') as f:
-    b64 = base64.b64encode(f.read()).decode()
-json.dump({'image_data':b64,'model_name':'resnet50'}, open('/tmp/payload.json','w'))
+img1 = base64.b64encode(open('image1.jpg','rb').read()).decode()
+img2 = base64.b64encode(open('image2.jpg','rb').read()).decode()
+json.dump({'model_name':'squeezenet1.1-7_trt','images':[img1,img2]}, open('/tmp/payload.json','w'))
 "
-curl -s -X POST http://localhost/predict -H 'Content-Type: application/json' -d @/tmp/payload.json | python3 -m json.tool
+curl -s -X POST http://localhost/predict/batch -H 'Content-Type: application/json' -d @/tmp/payload.json
 ```
 
 ---
@@ -92,8 +93,12 @@ curl -s -X POST http://localhost/predict -H 'Content-Type: application/json' -d 
 | - TRTBackend         |    | - MiddlewareChain        |
 | - ModelFactory       |    | - SessionManager         |
 | - ModelPipeline      |    | - DbConnectionPool       |
-| - RequestBatcher     |    | - MetricsCollector       |
-| - 16 个 Handler      |    +--------------------------+
+| - DynamicBatchSchd.  |    | - MetricsCollector       |
+| - RequestSlotPool    |    +--------------------------+
+| - ThreadPool         |
+| - HardwareDetector   |
+| - ConfigAdvisor      |
+| - 16 个 Handler      |
 +----------+-----------+    +--------------------------+
            │
            v
@@ -101,7 +106,7 @@ curl -s -X POST http://localhost/predict -H 'Content-Type: application/json' -d 
 | MySQL 8.0        |  用户数据、连接池
 | Redis 7          |  会话存储（可选，支持内存模式）
 | ONNX Runtime     |  CPU 推理
-| TensorRT 10      |  GPU 推理 (FP16/INT8)
+| TensorRT 10      |  GPU 推理 (FP16)
 +------------------+
 ```
 
@@ -111,7 +116,7 @@ curl -s -X POST http://localhost/predict -H 'Content-Type: application/json' -d 
 
 ## API 参考
 
-**Base URL:** `http://localhost` · **认证:** 登录后携带 `Cookie: sessionId=<uuid>`
+**Base URL:** `http://localhost` · **认证:** 登录后携带 `Cookie: sessionId=<uuid>` · **Content-Type:** `application/json`（除 `/predict/raw`）
 
 ### 端点总览
 
@@ -124,8 +129,8 @@ curl -s -X POST http://localhost/predict -H 'Content-Type: application/json' -d 
 | GET | `/menu` | 是 | AI 推理仪表盘 |
 | GET | `/backend` | 是 | 管理后台 |
 | GET | `/backend_data` | 是 | 在线统计 JSON |
-| POST | `/predict` | — | 图像推理 (JSON) |
-| POST | `/predict/batch` | — | 批量图像推理 |
+| POST | `/predict` | — | 单图推理 (JSON) |
+| POST | `/predict/batch` | — | 批量图像推理 (JSON) |
 | POST | `/predict/raw` | — | 原始图像推理 (binary body) |
 | POST | `/predict/proto` | — | 图像推理 (Protobuf) |
 | POST | `/models/load` | 是 | 动态加载模型 |
@@ -140,34 +145,69 @@ curl -s -X POST http://localhost/predict -H 'Content-Type: application/json' -d 
 | GET | `/metrics/json` | — | JSON 指标 |
 | GET | `/health` | — | 存活检查 |
 | GET | `/ready` | — | 就绪检查 |
+| GET | `/system/hardware` | — | 硬件配置 + 推荐 profile |
+| POST | `/system/config/apply` | 是 | 应用 stable / aggressive 配置 |
+| POST | `/system/restart` | 是 | 触发优雅重启 |
 
 ### 核心端点示例
 
-#### 推理 — `POST /predict`
+#### 推理 — `POST /predict` / `POST /predict/batch`
 
-支持分类、检测、分割、特征提取四种任务类型。`model_name` 从 `GET /models` 获取。
+单图推理和批量推理共享模型及参数格式。批量推理自动并行预处理，推荐用于多图场景。
+
+**请求 (batch):**
+```json
+{
+  "model_name": "squeezenet1.1-7_trt",
+  "images": ["<base64_img1>", "<base64_img2>"]
+}
+```
+
+**请求 (单图):**
+```json
+{
+  "model_name": "resnet50_classification_onnx",
+  "image_data": "<base64>"
+}
+```
+
+或使用文件路径（容器内）：
+```json
+{
+  "model_name": "yolov8l_onnx",
+  "image_path": "/app/models/cat.jpg"
+}
+```
 
 ```bash
-# 图片 base64 较大时，先写入文件再发送（避免 bash 参数上限）
+# 批量推理（推荐：base64 较大时先写文件再发送）
 python3 -c "
 import json,base64
-with open('/path/to/image.jpg','rb') as f:
-    b64 = base64.b64encode(f.read()).decode()
-json.dump({'image_data':b64,'model_name':'resnet50'}, open('/tmp/payload.json','w'))
+img1 = base64.b64encode(open('img1.jpg','rb').read()).decode()
+img2 = base64.b64encode(open('img2.jpg','rb').read()).decode()
+json.dump({'model_name':'squeezenet1.1-7_trt','images':[img1,img2]}, open('/tmp/payload.json','w'))
 "
-curl -s -X POST http://localhost/predict \
+curl -s -X POST http://localhost/predict/batch \
   -H 'Content-Type: application/json' \
   -d @/tmp/payload.json | python3 -m json.tool
 ```
 
-**分类响应 (resnet50):**
+**分类响应:**
 ```json
 {
   "status": "ok",
-  "task_type": "classification",
-  "predictions": [
-    {"id": 282, "label": "tiger cat", "confidence": 27.0},
-    {"id": 281, "label": "tabby", "confidence": 12.5}
+  "model_name": "squeezenet1.1-7_trt",
+  "count": 2,
+  "results": [
+    {
+      "status": "ok",
+      "task_type": "classification",
+      "summary": "识别结果：table lamp（1.9%），其他可能：ballpoint（1.8%）…",
+      "predictions": [
+        {"id": 846, "label": "table lamp", "confidence": 1.9},
+        {"id": 418, "label": "ballpoint", "confidence": 1.8}
+      ]
+    }
   ]
 }
 ```
@@ -188,9 +228,9 @@ curl -s -X POST http://localhost/predict \
 
 | 参数 | 必填 | 说明 |
 |------|------|------|
-| `image_data` | 二选一 | base64 编码的图片 |
-| `image_path` | 二选一 | 容器内的文件路径（`/app/models/xxx.jpg`） |
-| `model_name` | 否 | 模型名，默认 `resnet50`。可从 `GET /models` 获取 |
+| `image_data` / `image_path` | `predict` 二选一 | base64 字符串或容器内文件路径 |
+| `images` / `image_paths` | `predict/batch` 二选一 | base64 数组或路径数组 |
+| `model_name` | 否 | 模型名，默认 `resnet50`。从 `GET /models` 获取 |
 
 #### 监控 — `GET /metrics`
 
@@ -217,7 +257,7 @@ curl http://localhost/ready
 ```bash
 # 列出已加载的模型
 curl http://localhost/models
-# → [{"name":"resnet50","version":"1","type":"onnx","path":"...","is_latest":true}]
+# → [{"name":"resnet50_classification_trt","version":"1","type":"tensorrt","is_latest":true}]
 
 # 动态加载模型（需登录）
 curl -b cookies.txt -X POST http://localhost/models/load \
@@ -232,6 +272,28 @@ curl -b cookies.txt -X POST http://localhost/models/delete \
   -H "Content-Type: application/json" \
   -d '{"path":"/app/models/old_model.onnx"}'
 ```
+
+#### 自适应硬件配置
+
+```bash
+# 查看当前配置和推荐 profile
+curl http://localhost/system/hardware
+
+# 应用性能模式（需登录，重启后生效）
+curl -b cookies.txt -X POST http://localhost/system/config/apply \
+  -H "Content-Type: application/json" \
+  -d '{"profile":"aggressive"}'
+
+# 触发重启使配置生效
+curl -b cookies.txt -X POST http://localhost/system/restart -d '{}'
+
+# 恢复稳定模式
+curl -b cookies.txt -X POST http://localhost/system/config/apply \
+  -d '{"profile":"stable"}'
+curl -b cookies.txt -X POST http://localhost/system/restart -d '{}'
+```
+
+配置切换会写回 bind-mounted 源文件，容器重启后保持。`stable` 保留系统冗余（batch=16, threads=8, rate=1000/s），`aggressive` 最大化吞吐（batch=64, threads=12, 无速率限制）。
 
 #### 用户认证
 
@@ -261,18 +323,18 @@ curl -b cookies.txt http://localhost/menu
 ### 2. 注册模型（运行时，无需重启）
 
 ```bash
-# 分类模型（默认)
+# 分类模型（默认）
 curl -b cookies.txt -X POST http://localhost/models/load \
   -H "Content-Type: application/json" \
   -d '{"name":"mobilenet","version":"1","type":"onnx","path":"/app/models/mobilenet.onnx"}'
 
-# 检测模型（需指定 task）
+# 检测模型（需指定 task + 自定义归一化参数）
 curl -b cookies.txt -X POST http://localhost/models/load \
   -H "Content-Type: application/json" \
   -d '{"name":"yolov8l","version":"1","type":"onnx","path":"/app/models/yolov8l.onnx","task":"detection","labels":"/app/models/coco_80.txt","input_name":"images","output_name":"output0","input_width":640,"input_height":640,"input_mean":[0,0,0],"input_std":[1,1,1],"confidence_threshold":0.3}'
 ```
 
-加载后自动持久化到 `config.json`，重启后自动恢复。
+加载后自动持久化到 `config.json` → `dynamic_engines`，重启后自动恢复。
 
 ### 3. 测试推理
 
@@ -304,39 +366,45 @@ curl -X POST http://localhost/predict \
 
 ```json
 {
-  "server": { "port": 80, "threads": 4, "log_level": "WARN", "shutdown_timeout_ms": 30000 },
+  "server": { "port": 80, "threads": 8, "log_level": "WARN", "shutdown_timeout_ms": 30000,
+              "rate_limit_req_per_sec": 1000, "rate_limit_burst": 2000 },
   "logging": { "level": "INFO", "file": "server.log" },
-  "mysql": { "host": "tcp://mysql:3306", "user": "root", "password": "root", "database": "inference_platform", "pool_size": 10 },
+  "mysql": { "host": "tcp://mysql:3306", "user": "", "password": "", "database": "inference_platform", "pool_size": 10 },
   "redis": { "host": "redis", "port": 6379, "pool_size": 5 },
-  "models": { "labels_path": "/app/models/imagenet_classes.txt", "engines": { "resnet50": { "type": "onnx", "path": "/app/models/resnet50_classification.onnx" } } },
-  "batching": { "enabled": true, "max_batch_size": 8, "max_delay_ms": 10 }
+  "models": { "labels_path": "models/imagenet_classes.txt", "engines": {} },
+  "batching": { "enabled": true, "max_batch_size": 16, "max_delay_ms": 20,
+                "max_queue_delay_us": 50000, "preferred_batch_sizes": [4, 8, 16] },
+  "dynamic_engines": [],
+  "recommendations": { ... }
 }
 ```
 
+> `server.threads`、`batching.*`、`rate_limit_*` 会由 ConfigAdvisor 在首次启动时自动填入推荐值，并支持运行时通过 `/system/config/apply` 切换。
+
 ### 环境变量
 
-部署时通过 Compose 环境变量覆盖配置（见 [.env.example](.env.example)）：
+部署时通过 Compose 环境变量覆盖 MySQL/Redis 连接信息：
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `MYSQL_ROOT_PASSWORD` | `root` | MySQL root 密码（首次 init） |
 | `MYSQL_USER` | `root` | 应用连接 MySQL 的用户 |
 | `MYSQL_PASSWORD` | `root` | 应用连接 MySQL 的密码 |
 | `REDIS_HOST` | `redis` | Redis 主机名 |
 | `REDIS_PORT` | `6379` | Redis 端口 |
 
-> Redis `host: ""`（空字符串）时，服务自动降级为**内存 Session**（无需 Redis 容器），方便本地裸跑调试。生产环境推荐启用 Redis。`docker-entrypoint.sh` 会将环境变量注入 `config.json`。
+> Redis `host: ""`（空字符串）时，服务自动降级为**内存 Session**（无需 Redis 容器），方便本地裸跑调试。`docker-entrypoint.sh` 将环境变量注入 `/tmp/config.json`（运行时副本），不会污染持久化配置 `/app/config.json`。
 
 ### 命令行参数
 
 | 参数 | 说明 | 示例 |
 |------|------|------|
-| `-c <path>` | 配置文件 | `-c config.json` |
+| `-c <path>` | 运行时配置文件 | `-c config.json` |
+| `-P <path>` | 持久化配置文件 | `-P /app/config.json` |
 | `-p <port>` | 覆盖端口 | `-p 8080` |
 | `-t <n>` | I/O 线程数 | `-t 8` |
 | `-l <level>` | 日志级别 | `-l DEBUG` |
 
-CLI 参数优先级高于配置文件。
+CLI 参数优先级高于配置文件。`-P` 指定持久化写入目标（apply profile / saveConfig 写回此文件），默认等于 `-c`。
 
 ---
 
@@ -384,6 +452,7 @@ docker compose logs -f httpserver      # 查看日志
 docker compose down && ./start.sh cpu  # 重建重启
 cat access.log | jq .                  # 查看结构化访问日志
 curl http://localhost/metrics          # Prometheus 指标
+curl http://localhost/system/hardware  # 查看硬件配置
 ```
 
 ---
@@ -397,6 +466,8 @@ curl http://localhost/metrics          # Prometheus 指标
 | TensorRT INT8 | 13.8 ms | 15.2 ms | 142 |
 | TensorRT FP16 | 16.3 ms | 20.0 ms | 152 |
 | ONNX CPU | 76.3 ms | 83.6 ms | 44 |
+
+> 使用 `bench_adaptive.py` 进行稳定版/性能版自动压测和对比。
 
 ---
 
@@ -413,6 +484,13 @@ docker compose -f docker-compose.dev.yml restart
 
 开发容器启动时自动 `cmake .. && make -j$(nproc)`，之后只需 `restart` 就能生效改动。源码全量挂载到容器内 `/project`。
 
+### ASAN 调试
+
+```bash
+# CMakeLists.txt 中启用 ASAN（默认关，因为与 CUDA 不兼容）
+cmake .. -DENABLE_TENSORRT=OFF -DENABLE_ASAN=ON && make -j$(nproc)
+```
+
 ### 文档索引
 
 | 文档 | 内容 |
@@ -426,7 +504,8 @@ docker compose -f docker-compose.dev.yml restart
 - **Linux only**：muduo 基于 epoll，不支持 Windows/macOS
 - **模型文件不在仓库**：~470 MB，需单独放置
 - **GPU 推理串行**：`gpu_mutex_` 同一时刻一个 GPU 任务
-- **项目路径依赖**：HTML 资源通过 CWD 相对路径读取
+- **ASAN 与 CUDA 不兼容**：ASAN 影子内存与 CUDA 驱动冲突，GPU 模式下需关闭
+- **stb_image 全局状态**：JPEG decode 已用窄锁串行化，多模型高并发下 decode 吞吐受锁竞争影响
 
 ---
 

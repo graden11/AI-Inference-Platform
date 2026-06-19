@@ -57,7 +57,7 @@ Middleware runs in order: MetricsMiddleware (records latency), then CorsMiddlewa
 
 ### Handler registration
 
-All 14 handlers are registered in `InferenceServer::initializeRouter()` (`WebApps/InferenceServer/src/InferenceServer.cpp`). Handlers use the **friend class** pattern — each handler class is declared `friend` in `InferenceServer.h` so it can access private state (`onlineUsers_`, `loginSessions_`, `mysqlUtil_`, `modelFactory_`).
+All handlers are registered in `InferenceServer::initializeRouter()` (`WebApps/InferenceServer/src/InferenceServer.cpp`). Handlers use the **friend class** pattern — each handler class is declared `friend` in `InferenceServer.h` so it can access private state (`onlineUsers_`, `loginSessions_`, `mysqlUtil_`, `modelFactory_`).
 
 Routes:
 
@@ -94,10 +94,13 @@ Two registration styles coexist:
 
 ### Inference engines
 
-`ModelFactory` (`WebApps/InferenceServer/src/ModelFactory.cpp`) supports **versioned model storage**: `name → (version → shared_ptr<InferenceEngine>)`. Models are addressed as `"name:version"` (e.g. `"resnet50:v2"`), omitting version returns the latest.
+`ModelFactory` (`WebApps/InferenceServer/src/ModelFactory.cpp`) supports **versioned model storage**: `name → (version → shared_ptr<ModelPipeline>)`. Models are addressed as `"name:version"` (e.g. `"resnet50:v2"`), omitting version returns the latest.
 
-- `"onnx"` type → `ResNet50Engine` (CPU, ONNX Runtime)
-- `"tensorrt"` type → `ResNet50TRTEngine` (GPU, TensorRT)
+Each model is wrapped in a `ModelPipeline` which links a backend (`InferenceEngine`), preprocessor, and postprocessor.
+
+- `"onnx"` type → `OnnxBackend` (CPU, ONNX Runtime). Auto-detects shape, layout, and task type from model graph.
+- `"tensorrt"` type → `TRTBackend` (GPU, TensorRT). Initializes CUDA via `cudaGetDeviceCount()`, supports dynamic batch shapes.
+- Backend creation is abstracted via `BackendRegistry` (factory pattern), making it easy to add new engine types.
 
 GPU inference is serialized with `gpu_mutex_` — one request at a time. Thread safety uses `shared_mutex` (shared_lock for reads, unique_lock for writes). `shared_ptr` ownership ensures in-flight inferences survive model unload.
 
@@ -113,14 +116,24 @@ Static models (in `config.json` → `models.engines`) are loaded at startup. Dyn
 
 ### Dynamic batching
 
-`RequestBatcher` collects incoming prediction requests into batches to improve GPU/CPU throughput:
+`DynamicBatchScheduler` collects incoming prediction requests into batches to improve GPU/CPU throughput:
 
-- Config: `batching.enabled` (default false), `max_batch_size`, `max_delay_ms`
-- Worker thread waits for first request, collects up to `max_batch_size` or `max_delay_ms`, groups by model name
-- Each group dispatched to `engine->predictBatch()` for single-inference-call processing
-- Falls back to sequential `predictFromBytes()` when batching disabled or engine lacks batch support
+- Config: `batching.enabled`, `max_batch_size`, `max_queue_delay_us`, `preferred_batch_sizes`, `max_queue_size`
+- Worker thread collects requests grouped by (model, W, H, C) key, dispatches at preferred batch sizes or on deadline
+- Preprocessing parallelized via `ThreadPool` → `ImagePreprocessor::preprocessInto()` writes directly into batch tensor buffer
+- `stbi_load_from_memory()` is guarded by a narrow mutex (stb_image uses global state, not thread-safe)
+- `RequestSlotPool` pre-allocates slots to amortize allocation overhead
 - ONNX: builds `{N, C, H, W}` tensor, single `session_->Run()`
-- TensorRT: pre-allocates `maxBatchSize` pinned + device buffers, sets dynamic input shape, single GPU enqueue
+- TensorRT: pre-allocates `maxBatchSize` pinned + device buffers, sets dynamic input shape, single GPU enqueue via CUDA stream
+
+### Deferred async response
+
+`PredictHandler`, `RawPredictHandler`, and `BatchPredictHandler` use `resp->setDeferred(true)` pattern:
+1. Handler sets deferred flag, captures `conn`, `complete` callback, `perfTrace`, `keepAlive` flag
+2. Spawns detached `std::thread` that blocks on `future.get()` for inference result
+3. Creates local `HttpResponse r(!keepAlive)`, calls `appendToBuffer()`, sends via `conn->getLoop()->runInLoop()`
+4. Calls `complete()` to decrement `inflightCount_`
+5. If `!keepAlive`, schedules 10ms delayed `conn->shutdown()` so the connection `Connection` header matches actual behavior
 
 ### Graceful shutdown
 
@@ -131,16 +144,68 @@ SIGINT/SIGTERM → `sigwait()` thread → `HttpServer::gracefulShutdown()`:
 
 ### Config flow
 
-`main.cpp` parses CLI args in **two passes**: first to find `-c <configPath>`, then to override port/threads/log_level from CLI. So `-p 8080` always wins over what's in config.json.
+`main.cpp` parses CLI args in **two passes**: first to find `-c <configPath>` and `-P <persistConfigPath>`, then to override port/threads/log_level from CLI. So `-p 8080` always wins over what's in config.json.
+
+**Dual-path design** (`-c` vs `-P`):
+- `-c <path>` (default: `config.json`) — **runtime** config. In Docker this is `/tmp/config.json` (env-var substituted copy).
+- `-P <path>` (default: same as `-c`) — **persist** config. In Docker this is `/app/config.json` (bind-mounted source).
+- All runtime state reads `-c`; all persisted writes (`POST /system/config/apply`, `saveConfig()`, `ConfigAdvisor`) go to `-P`. This ensures profile switches survive container restarts without leaking env-substituted credentials back to the bind-mounted source.
 
 Config structure (`config.json`):
-- `server` — port, threads, log_level, shutdown_timeout_ms
-- `logging` — spdlog level + file
+- `server` — port, threads, log_level, shutdown_timeout_ms, rate_limit_req_per_sec, rate_limit_burst
+- `logging` — spdlog level + file + access_log
 - `mysql` — host, user, password, database, pool_size
 - `redis` — host, port, pool_size (empty host = in-memory sessions)
 - `models` — `labels_path` + `engines` (static models: name → {type, version?, path})
-- `batching` — `enabled`, `max_batch_size`, `max_delay_ms`
+- `batching` — `enabled`, `max_batch_size`, `max_delay_ms`, `max_queue_delay_us`, `preferred_batch_sizes`, `max_queue_size`
 - `dynamic_engines` — persisted by `/models/load` API, restored on restart
+- `recommendations` — generated by HardwareDetector + ConfigAdvisor at startup (system_profile, stable/aggressive profiles)
+
+### Routes (updated)
+
+| Method | Path | Handler | Auth |
+|--------|------|---------|------|
+| GET | `/`, `/entry` | EntryHandler | No |
+| POST | `/login` | LoginHandler | No |
+| POST | `/register` | RegisterHandler | No |
+| POST | `/user/logout` | LogoutHandler | Yes |
+| GET | `/menu` | MenuHandler | Yes |
+| GET | `/backend` | GameBackendHandler | Yes |
+| GET | `/backend_data` | (lambda) | No |
+| POST | `/predict` | PredictHandler | No |
+| POST | `/predict/batch` | BatchPredictHandler | No |
+| POST | `/predict/raw` | RawPredictHandler | No |
+| POST | `/predict/proto` | ProtoPredictHandler | No |
+| GET | `/metrics` `/metrics/json` | MetricsHandler | No |
+| POST | `/models/load` | ModelLoadHandler | Yes |
+| GET | `/models` | ModelListHandler | No |
+| DELETE | `/models/:name/:version` | ModelUnloadHandler | Yes |
+| GET | `/health` | HealthHandler | No |
+| GET | `/ready` | ReadyHandler | No |
+| GET | `/system/hardware` | SystemHandler | No |
+| POST | `/system/config/apply` | SystemHandler | Yes |
+| POST | `/system/restart` | SystemHandler | Yes |
+
+### Dynamic batching
+
+`DynamicBatchScheduler` (replaces old `RequestBatcher`) collects incoming prediction requests into batches to improve GPU/CPU throughput:
+
+- Config: `batching.enabled`, `max_batch_size`, `max_queue_delay_us`, `preferred_batch_sizes`, `max_queue_size`
+- Worker thread collects requests grouped by (model, W, H, C) key, dispatches at preferred batch sizes or on deadline
+- Preprocessing parallelized via `ThreadPool` → `ImagePreprocessor::preprocessInto()` writes directly into batch tensor buffer
+- `stbi_load_from_memory()` is guarded by a narrow mutex (stb_image uses global state, not thread-safe)
+- `RequestSlotPool` pre-allocates slots to amortize allocation overhead
+- ONNX: builds `{N, C, H, W}` tensor, single `session_->Run()`
+- TensorRT: pre-allocates `maxBatchSize` pinned + device buffers, sets dynamic input shape, single GPU enqueue via CUDA stream
+
+### Deferred async response
+
+`PredictHandler`, `RawPredictHandler`, and `BatchPredictHandler` use `resp->setDeferred(true)` pattern:
+1. Handler sets deferred flag, captures `conn`, `complete` callback, `perfTrace`, `keepAlive` flag
+2. Spawns detached `std::thread` that blocks on `future.get()` for inference result
+3. Creates local `HttpResponse r(!keepAlive)`, calls `appendToBuffer()`, sends via `conn->getLoop()->runInLoop()`
+4. Calls `complete()` to decrement `inflightCount_`
+5. If `!keepAlive`, schedules 10ms delayed `conn->shutdown()` so the connection `Connection` header matches actual behavior
 
 ### HTML resources
 
@@ -154,3 +219,5 @@ Handlers read HTML files at runtime via relative path `../WebApps/InferenceServe
 - **Single binary**: all routes compiled in, no hot-reload or plugin system
 - **When `ENABLE_TENSORRT=OFF`**, `ResNet50TRTEngine.cpp` is excluded from the build via `list(FILTER ... EXCLUDE REGEX)`
 - **Dockerfile needs pre-built binary**: the production Dockerfile copies `build/simple_server`, so you must run `cmake` + `make` before `docker compose build`
+- **ASAN vs CUDA**: AddressSanitizer shadow memory conflicts with CUDA driver VRAM mapping — GPU builds must disable ASAN (`-DENABLE_ASAN=OFF`, the default). Use ASAN only for CPU debug builds.
+- **Config dual-path**: runtime reads from `-c <path>` (Docker: `/tmp/config.json`), persist writes go to `-P <path>` (Docker: `/app/config.json`). This prevents env-substituted credentials from leaking into the bind-mounted source.
