@@ -15,16 +15,20 @@ int main(int argc, char* argv[])
   LOG_INFO << "pid = " << getpid();
 
   std::string configPath = "config.json";
+  std::string persistConfigPath;  // empty = same as configPath
 
   // Parse CLI args
   int opt;
-  const char* str = "p:t:l:c:";
+  const char* str = "p:t:l:c:P:";
   while ((opt = getopt(argc, argv, str)) != -1)
   {
     switch (opt)
     {
       case 'c':
         configPath = optarg;
+        break;
+      case 'P':
+        persistConfigPath = optarg;
         break;
       default:
         break;
@@ -70,6 +74,7 @@ int main(int argc, char* argv[])
 
   InferenceServer server(cfg);
   server.setConfigPath(configPath);
+  server.setPersistConfigPath(persistConfigPath.empty() ? configPath : persistConfigPath);
   server.initAdaptiveConfig();
   server.setThreadNum(cfg.server.threads);
 

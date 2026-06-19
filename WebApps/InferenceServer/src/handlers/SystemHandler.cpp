@@ -70,6 +70,8 @@ void SystemHandler::handleGetHardware(const http::HttpRequest &req, http::HttpRe
                     params["server_threads"]       = prof.params.server_threads;
                     params["max_batch_size"]       = prof.params.max_batch_size;
                     params["max_delay_ms"]         = prof.params.max_delay_ms;
+                    params["max_queue_delay_us"]   = prof.params.max_queue_delay_us;
+                    params["preferred_batch_sizes"] = prof.params.preferred_batch_sizes;
                     params["workspace_mb"]         = prof.params.workspace_mb;
                     params["fp16"]                 = prof.params.fp16;
                     params["rate_limit_req_per_sec"] = prof.params.rate_limit_req_per_sec;
@@ -87,6 +89,9 @@ void SystemHandler::handleGetHardware(const http::HttpRequest &req, http::HttpRe
             cur["server_threads"] = cfg.server.threads;
             cur["max_batch_size"] = cfg.batching.max_batch_size;
             cur["max_delay_ms"]   = cfg.batching.max_delay_ms;
+            cur["max_queue_delay_us"] = cfg.batching.max_queue_delay_us;
+            if (!cfg.batching.preferred_batch_sizes.empty())
+                cur["preferred_batch_sizes"] = cfg.batching.preferred_batch_sizes;
             cur["rate_limit_req_per_sec"] = cfg.server.rate_limit_req_per_sec;
             cur["rate_limit_burst"]      = cfg.server.rate_limit_burst;
             cur["fp16"]            = rec.system_profile.has_gpu && rec.system_profile.gpu_count > 0;
@@ -160,7 +165,7 @@ void SystemHandler::handleApplyConfig(const http::HttpRequest &req, http::HttpRe
         // Read existing config, update values, write back
         json j;
         {
-            std::ifstream f(server_->configPath_);
+            std::ifstream f(server_->persistConfigPath_);
             if (f.good())
             {
                 try { f >> j; }
@@ -185,9 +190,12 @@ void SystemHandler::handleApplyConfig(const http::HttpRequest &req, http::HttpRe
         j["batching"]["enabled"]       = (p.max_batch_size > 1);
         j["batching"]["max_batch_size"] = p.max_batch_size;
         j["batching"]["max_delay_ms"]   = p.max_delay_ms;
+        j["batching"]["max_queue_delay_us"] = p.max_queue_delay_us;
+        if (!p.preferred_batch_sizes.empty())
+            j["batching"]["preferred_batch_sizes"] = p.preferred_batch_sizes;
 
         {
-            std::ofstream of(server_->configPath_);
+            std::ofstream of(server_->persistConfigPath_);
             of << j.dump(2) << std::endl;
         }
 
@@ -197,6 +205,9 @@ void SystemHandler::handleApplyConfig(const http::HttpRequest &req, http::HttpRe
         server_->config_.batching.enabled            = (p.max_batch_size > 1);
         server_->config_.batching.max_batch_size     = p.max_batch_size;
         server_->config_.batching.max_delay_ms       = p.max_delay_ms;
+        server_->config_.batching.max_queue_delay_us = p.max_queue_delay_us;
+        if (!p.preferred_batch_sizes.empty())
+            server_->config_.batching.preferred_batch_sizes = p.preferred_batch_sizes;
         server_->config_.server.rate_limit_req_per_sec = p.rate_limit_req_per_sec;
         server_->config_.server.rate_limit_burst     = p.rate_limit_burst;
 

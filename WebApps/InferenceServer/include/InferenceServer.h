@@ -31,7 +31,8 @@ class ModelLoadHandler;
 class ModelListHandler;
 class ModelUnloadHandler;
 class ConvertHandler;
-class RequestBatcher;
+class DynamicBatchScheduler;
+class InferenceExecutor;
 class ReadyHandler;
 
 
@@ -50,6 +51,9 @@ public:
 
     const std::string& getConfigPath() const { return configPath_; }
     void setConfigPath(const std::string& path) { configPath_ = path; }
+
+    const std::string& getPersistConfigPath() const { return persistConfigPath_; }
+    void setPersistConfigPath(const std::string& path) { persistConfigPath_ = path; }
 
     muduo::net::EventLoop* getLoop() { return httpServer_.getLoop(); }
     int getShutdownTimeoutMs() const { return config_.server.shutdown_timeout_ms; }
@@ -158,7 +162,9 @@ private:
     std::unique_ptr<inference::ConversionManager>    conversionManager_;
 #endif
     // 动态批处理（shared_ptr 因为 PredictHandler 需要持有引用）
-    std::shared_ptr<RequestBatcher>                  batcher_;
+    std::shared_ptr<DynamicBatchScheduler>            scheduler_;
+    std::shared_ptr<InferenceExecutor>                 gpuExecutor_;
+    std::shared_ptr<InferenceExecutor>                 cpuExecutor_;
     // 请求槽位池（Phase 6：复用 imageBytes/inputTensor/resultJson）
     std::shared_ptr<RequestSlotPool>                 slotPool_;
     // 预处理线程池（Phase 5：并行 stbi decode + resize + normalize）
@@ -166,4 +172,5 @@ private:
     // 应用配置
     AppConfig                                        config_;
     std::string                                      configPath_;
+    std::string                                      persistConfigPath_;
 };

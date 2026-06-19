@@ -19,7 +19,8 @@
 #include "../include/handlers/ConvertHandler.h"
 #endif
 #include "../include/InferenceServer.h"
-#include "../include/RequestBatcher.h"
+#include "../include/DynamicBatchScheduler.h"
+#include "../include/InferenceExecutor.h"
 #include "../include/ModelPipeline.h"
 #include "../include/BackendRegistry.h"
 #include "../include/Preprocessor.h"
@@ -71,10 +72,10 @@ void InferenceServer::start()
 void InferenceServer::cleanup()
 {
     LOG_INFO << "Cleaning up resources...";
-    if (batcher_)
+    if (scheduler_)
     {
-        batcher_->stop();
-        batcher_.reset();
+        scheduler_->stop();
+        scheduler_.reset();
     }
     modelFactory_.reset();
     LOG_INFO << "Cleanup complete";
@@ -97,6 +98,10 @@ void InferenceServer::initialize()
     // 必须在initializeRouter之前，因为路由注册会用到modelFactory_
     modelFactory_ = std::make_unique<ModelFactory>();
 
+    // Default persistConfigPath_ to configPath_ if never explicitly set
+    if (persistConfigPath_.empty())
+        persistConfigPath_ = configPath_;
+
 #ifdef ENABLE_TENSORRT
     conversionManager_ = std::make_unique<inference::ConversionManager>();
 #endif
@@ -104,13 +109,27 @@ void InferenceServer::initialize()
     // 初始化批处理器（在模型加载之前创建，因为路由注册需要它）
     if (config_.batching.enabled)
     {
-        batcher_ = std::make_shared<RequestBatcher>(
+        int cpuCores = static_cast<int>(std::thread::hardware_concurrency());
+        int cpuConc   = std::max(1, std::min(cpuCores / 2, 4));
+        gpuExecutor_  = std::make_shared<InferenceExecutor>(1);      // GPU serial
+        cpuExecutor_  = std::make_shared<InferenceExecutor>(cpuConc); // CPU parallel
+
+        scheduler_ = std::make_shared<DynamicBatchScheduler>(
             modelFactory_.get(),
-            config_.batching.max_batch_size,
-            std::chrono::milliseconds(config_.batching.max_delay_ms));
-        batcher_->start();
-        LOG_INFO << "Dynamic batching enabled: maxBatchSize=" << config_.batching.max_batch_size
-                 << ", maxDelayMs=" << config_.batching.max_delay_ms;
+            config_.batching,
+            gpuExecutor_.get(),
+            cpuExecutor_.get());
+        scheduler_->start();
+        LOG_INFO << "Dynamic batch scheduler enabled: maxBatchSize=" << config_.batching.max_batch_size
+                 << ", maxQueueDelayUs=" << config_.batching.max_queue_delay_us
+                 << ", preferredBatchSizes=" << [&]() {
+                     std::string s;
+                     for (auto v : config_.batching.preferred_batch_sizes) {
+                         if (!s.empty()) s += ",";
+                         s += std::to_string(v);
+                     }
+                     return s;
+                 }();
     }
 
     // ── Phase 5+6: Slot pool + preprocessing thread pool ──
@@ -223,7 +242,7 @@ void InferenceServer::initAdaptiveConfig()
     HardwareProfile hw;
     if (HardwareDetector::detect(hw))
     {
-        ConfigAdvisor::analyze(config_, hw, modelFactory_.get(), configPath_);
+        ConfigAdvisor::analyze(config_, hw, modelFactory_.get(), persistConfigPath_);
     }
     else
     {
@@ -288,9 +307,9 @@ void InferenceServer::initializeRouter()
         getBackendData(req, resp);
     });
 
-    httpServer_.Post("/predict", std::make_shared<PredictHandler>(modelFactory_.get(), batcher_.get(), slotPool_.get()));
-    httpServer_.Post("/predict/raw", std::make_shared<RawPredictHandler>(modelFactory_.get(), batcher_.get(), slotPool_.get()));
-    httpServer_.Post("/predict/batch", std::make_shared<BatchPredictHandler>(modelFactory_.get(), batcher_.get(), slotPool_.get()));
+    httpServer_.Post("/predict", std::make_shared<PredictHandler>(modelFactory_.get(), scheduler_.get(), slotPool_.get()));
+    httpServer_.Post("/predict/raw", std::make_shared<RawPredictHandler>(modelFactory_.get(), scheduler_.get(), slotPool_.get()));
+    httpServer_.Post("/predict/batch", std::make_shared<BatchPredictHandler>(modelFactory_.get(), scheduler_.get(), slotPool_.get()));
     httpServer_.Post("/predict/proto", std::make_shared<ProtoPredictHandler>(modelFactory_.get()));
     httpServer_.Get("/metrics", std::make_shared<MetricsHandler>());
     httpServer_.Get("/metrics/json", std::make_shared<MetricsHandler>());
@@ -599,7 +618,7 @@ void InferenceServer::saveConfig() const
     try
     {
         json j;
-        std::ifstream f(configPath_);
+        std::ifstream f(persistConfigPath_);
         if (f.good())
         {
             f >> j;
@@ -647,9 +666,9 @@ void InferenceServer::saveConfig() const
         }
         j["dynamic_engines"] = dynamicEngines;
 
-        std::ofstream of(configPath_);
+        std::ofstream of(persistConfigPath_);
         of << j.dump(2) << std::endl;
-        LOG_INFO << "Config saved to " << configPath_;
+        LOG_INFO << "Config saved to " << persistConfigPath_;
     }
     catch (const std::exception& e)
     {

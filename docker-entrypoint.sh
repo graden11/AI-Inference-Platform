@@ -20,4 +20,4 @@ if [ -n "$REDIS_PORT" ]; then
     sed -i "/\"redis\": {/,/}/{s|\"port\": [0-9]*|\"port\": $REDIS_PORT|}" "$CONFIG_TMP"
 fi
 
-exec ./simple_server -c "$CONFIG_TMP" "$@"
+exec ./simple_server -c "$CONFIG_TMP" -P /app/config.json "$@"
