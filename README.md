@@ -515,8 +515,8 @@ cmake .. -DENABLE_TENSORRT=OFF -DENABLE_ASAN=ON && make -j$(nproc)
 ## 已知限制
 
 - **Linux only**：muduo 基于 epoll，不支持 Windows/macOS
-- **模型文件不在仓库**：~470 MB，需单独放置
-- **GPU 推理串行**：`gpu_mutex_` 同一时刻一个 GPU 任务
+- **模型文件不在仓库**：ONNX ~420 MB + TRT ~250 MB，需单独放置
+- **GPU 推理批处理驱动**：GPU 任务由单线程 `InferenceExecutor` + `gpu_mutex_` 串行调度，吞吐依靠动态批处理（batch 内并行），不依赖多 stream 并发
 - **ASAN 与 CUDA 不兼容**：ASAN 影子内存与 CUDA 驱动冲突，GPU 模式下需关闭
 - **stb_image 全局状态**：JPEG decode 已用窄锁串行化，多模型高并发下 decode 吞吐受锁竞争影响
 

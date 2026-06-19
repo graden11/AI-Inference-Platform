@@ -102,7 +102,7 @@ Each model is wrapped in a `ModelPipeline` which links a backend (`InferenceEngi
 - `"tensorrt"` type → `TRTBackend` (GPU, TensorRT). Initializes CUDA via `cudaGetDeviceCount()`, supports dynamic batch shapes.
 - Backend creation is abstracted via `BackendRegistry` (factory pattern), making it easy to add new engine types.
 
-GPU inference is serialized with `gpu_mutex_` — one request at a time. Thread safety uses `shared_mutex` (shared_lock for reads, unique_lock for writes). `shared_ptr` ownership ensures in-flight inferences survive model unload.
+GPU inference is dispatched serially via single-threaded `InferenceExecutor` (concurrency=1) + per-model `gpu_mutex_`. Throughput comes from dynamic batching — batch of N images runs as one GPU kernel launch (`inferBatch()`, `{N,C,H,W}` tensor), so N images compute in parallel on the GPU. Thread safety uses `shared_mutex` (shared_lock for reads, unique_lock for writes). `shared_ptr` ownership ensures in-flight inferences survive model unload.
 
 ### Dynamic model management
 
