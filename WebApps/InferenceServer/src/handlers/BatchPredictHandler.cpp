@@ -217,7 +217,7 @@ void BatchPredictHandler::handle(const http::HttpRequest &req, http::HttpRespons
 
             auto buf = std::make_shared<muduo::net::Buffer>();
             {
-                http::HttpResponse r(false);
+                http::HttpResponse r(!keepAlive);
                 r.setStatusLine(version, http::HttpResponse::k200Ok, "OK");
                 r.setContentType("application/json");
                 r.setContentLength(respBody.size());
