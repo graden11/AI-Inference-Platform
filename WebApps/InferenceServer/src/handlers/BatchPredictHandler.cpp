@@ -1,7 +1,7 @@
 #include "../../include/handlers/BatchPredictHandler.h"
 #include "../../include/ModelFactory.h"
 #include "../../include/InferenceEngine.h"
-#include "../../include/RequestBatcher.h"
+#include "../../include/DynamicBatchScheduler.h"
 #include "../../include/RequestSlotPool.h"
 
 #include "../../../../HttpServer/include/http/HttpResponse.h"
@@ -67,6 +67,7 @@ void BatchPredictHandler::handle(const http::HttpRequest &req, http::HttpRespons
         }
 
         std::string modelName = body.value("model_name", "resnet50");
+        LOG_INFO << "BatchPredictHandler: model=" << modelName << " bodySize=" << req.getBody().size();
 
         // ── Check model exists ──
         auto engine = factory_->getModel(modelName);
@@ -86,6 +87,7 @@ void BatchPredictHandler::handle(const http::HttpRequest &req, http::HttpRespons
             if (!slot)
                 slot = std::make_shared<RequestSlot>();
             slot->imageBytes = std::move(imageBytes);
+            slot->perfTrace = resp->getPerfTrace();
             auto future = batcher_->submit(modelName, slot);
             futures.push_back(std::move(future));
             slots.push_back(std::move(slot));
@@ -153,10 +155,13 @@ void BatchPredictHandler::handle(const http::HttpRequest &req, http::HttpRespons
         int count = static_cast<int>(slots.size());
 
         resp->setDeferred(true);
+        bool keepAlive = !resp->closeConnection();
         auto conn = resp->getTcpConnection();
         auto version = req.getVersion();
         auto complete = resp->takeCompleteCallback();
         auto perfTrace = resp->getPerfTrace();
+
+        LOG_INFO << "BatchPredictHandler: deferring " << count << " images, conn=" << conn.get();
 
         std::thread([conn = std::move(conn),
                      version = std::move(version),
@@ -164,8 +169,11 @@ void BatchPredictHandler::handle(const http::HttpRequest &req, http::HttpRespons
                      count,
                      futures = std::move(futures),
                      slots = std::move(slots),
+                     keepAlive,
                      perfTrace = std::move(perfTrace),
                      complete = std::move(complete)]() mutable {
+            try {
+            LOG_INFO << "BatchPredictHandler[async]: waiting on " << count << " futures";
             json response;
             response["status"] = "ok";
             response["model_name"] = modelName;
@@ -176,7 +184,10 @@ void BatchPredictHandler::handle(const http::HttpRequest &req, http::HttpRespons
             {
                 try
                 {
+                    LOG_INFO << "BatchPredictHandler[async]: future[" << i << "].get()...";
                     futures[i].get();  // synchronize with batcher dispatch
+                    LOG_INFO << "BatchPredictHandler[async]: future[" << i << "] done, resultJson="
+                             << (slots[i] ? slots[i]->resultJson.size() : -1) << " bytes";
                     std::string resultJson = slots[i] ? std::move(slots[i]->resultJson) : "{}";
                     try
                     {
@@ -192,6 +203,7 @@ void BatchPredictHandler::handle(const http::HttpRequest &req, http::HttpRespons
                 }
                 catch (const std::exception& e)
                 {
+                    LOG_ERROR << "BatchPredictHandler[async]: future[" << i << "] exception: " << e.what();
                     json err;
                     err["status"] = "error";
                     err["message"] = std::string("batch inference failed: ") + e.what();
@@ -201,6 +213,7 @@ void BatchPredictHandler::handle(const http::HttpRequest &req, http::HttpRespons
             response["results"] = results;
 
             std::string respBody = response.dump();
+            LOG_INFO << "BatchPredictHandler[async]: sending response " << respBody.size() << " bytes";
 
             auto buf = std::make_shared<muduo::net::Buffer>();
             {
@@ -220,7 +233,22 @@ void BatchPredictHandler::handle(const http::HttpRequest &req, http::HttpRespons
             if (perfTrace)
                 perfTrace->dump(100);
 
+            if (!keepAlive)
+            {
+                conn->getLoop()->runAfter(0.01, [conn]() {
+                    conn->shutdown();
+                });
+            }
+
             complete();
+            LOG_INFO << "BatchPredictHandler[async]: done";
+            } catch (const std::exception& e) {
+                LOG_ERROR << "BatchPredictHandler[async]: CRASH in async thread: " << e.what();
+                try { complete(); } catch (...) {}
+            } catch (...) {
+                LOG_ERROR << "BatchPredictHandler[async]: CRASH in async thread (unknown)";
+                try { complete(); } catch (...) {}
+            }
         }).detach();
     }
     catch (const json::exception &e)

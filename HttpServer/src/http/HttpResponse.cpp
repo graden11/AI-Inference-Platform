@@ -20,9 +20,14 @@ void HttpResponse::appendToBuffer(muduo::net::Buffer* outputBuf) const
     }
     else
     {
+        outputBuf->append("Connection: Keep-Alive\r\n");
+    }
+
+    // Auto-compute Content-Length if handler didn't set it (avoids duplicate)
+    if (headers_.find("Content-Length") == headers_.end())
+    {
         snprintf(buf, sizeof buf, "Content-Length: %zd\r\n", body_.size());
         outputBuf->append(buf);
-        outputBuf->append("Connection: Keep-Alive\r\n");
     }
 
     for (const auto& header : headers_)

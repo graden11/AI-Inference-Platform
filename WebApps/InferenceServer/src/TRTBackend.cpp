@@ -25,8 +25,26 @@ void TRTBackend::Logger::log(Severity severity, const char* msg) noexcept
 // ---------------------------------------------------------------------------
 static bool initCuda()
 {
-    cudaError_t err = cudaFree(nullptr);
-    return err == cudaSuccess;
+    // Lazy CUDA initialisation via cudaFree(nullptr) is unreliable across
+    // driver / container-toolkit combinations.  Query the device count
+    // instead — this forces proper initialisation and validates that at
+    // least one GPU is visible.
+    int deviceCount = 0;
+    cudaError_t err = cudaGetDeviceCount(&deviceCount);
+    if (err != cudaSuccess)
+    {
+        LOG_ERROR << "CUDA init failed: " << cudaGetErrorString(err)
+                  << " (err=" << static_cast<int>(err) << ")";
+        return false;
+    }
+    if (deviceCount <= 0)
+    {
+        LOG_ERROR << "CUDA init: no devices found (driver may be loaded but "
+                     "no GPU visible to this container)";
+        return false;
+    }
+    LOG_INFO << "CUDA init OK, " << deviceCount << " device(s) visible";
+    return true;
 }
 
 // ---------------------------------------------------------------------------

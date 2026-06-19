@@ -5,6 +5,16 @@ project(simple_server)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# ASAN: Address Sanitizer + debug symbols (off by default — conflicts with CUDA)
+option(ENABLE_ASAN "Build with AddressSanitizer" OFF)
+if(ENABLE_ASAN)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -g -fno-omit-frame-pointer")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -g -fno-omit-frame-pointer")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fsanitize=address")
+    message(STATUS "ASAN: ENABLED")
+endif()
+
 # 编译选项：GPU 推理（TensorRT），云服务器部署时设为 OFF
 option(ENABLE_TENSORRT "Build with TensorRT GPU inference" ON)
 
@@ -82,6 +92,10 @@ if(NOT ENABLE_TENSORRT)
     list(FILTER INFERENCE_SERVER_SRC EXCLUDE REGEX "ConversionManager\\.cpp")
     list(FILTER INFERENCE_SERVER_SRC EXCLUDE REGEX "ConvertHandler\\.cpp")
 endif()
+
+# Old RequestBatcher replaced by DynamicBatchScheduler — keep source for
+# reference but exclude from build to avoid duplicate symbol errors.
+list(FILTER INFERENCE_SERVER_SRC EXCLUDE REGEX "RequestBatcher\\.cpp")
 
 if(NOT HIREDIS_LIBRARY)
     list(FILTER HTTP_SERVER_SRC EXCLUDE REGEX "RedisSessionStorage\\.cpp")

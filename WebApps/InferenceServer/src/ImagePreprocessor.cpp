@@ -6,9 +6,14 @@
 #include "../include/ImagePreprocessor.h"
 
 #include <algorithm>
+#include <mutex>
 #include <muduo/base/Logging.h>
 
 namespace inference {
+
+// stbi_load_from_memory() uses global/static state — serialize across threads.
+// Scope is intentionally narrow: only the JPEG decode call, not resize/normalize.
+static std::mutex gStbMutex;
 
 ImagePreprocessor::ImagePreprocessor(const ModelConfig& config)
     : targetW_(config.input.preferred_width),
@@ -31,24 +36,34 @@ ImagePreprocessor::ImagePreprocessor(const ModelConfig& config)
 bool ImagePreprocessor::preprocess(const std::vector<uint8_t>& imageBytes,
                                   std::vector<float>& output)
 {
+    const int elemCount = targetC_ * targetH_ * targetW_;
+    if (elemCount <= 0)
+    {
+        LOG_ERROR << "ImagePreprocessor::preprocess: invalid input shape (c="
+                  << targetC_ << " h=" << targetH_ << " w=" << targetW_ << ")";
+        return false;
+    }
+
     int w, h, channels;
-    unsigned char* data = stbi_load_from_memory(
-        imageBytes.data(), static_cast<int>(imageBytes.size()),
-        &w, &h, &channels, targetC_);
+    unsigned char* data;
+    {
+        std::lock_guard<std::mutex> lock(gStbMutex);
+        data = stbi_load_from_memory(
+            imageBytes.data(), static_cast<int>(imageBytes.size()),
+            &w, &h, &channels, targetC_);
+    }
     if (!data)
     {
         LOG_ERROR << "ImagePreprocessor: failed to decode image";
         return false;
     }
 
-    const int elemCount = targetC_ * targetH_ * targetW_;
-
     // uint8 srgb → uint8 linear resize via stb. Cannot eliminate this intermediate
     // buffer because stbir_resize_uint8_srgb outputs uint8 only; a direct
     // uint8→float resize with stbir_resize(generic) proved unreliable at value range.
     // Thread-local: reused across calls on the same thread, avoiding 150KB malloc/free.
     thread_local static std::vector<uint8_t> resized;
-    resized.resize(targetH_ * targetW_ * targetC_);
+    resized.resize(elemCount);
     stbir_resize_uint8_srgb(data, w, h, 0,
                             resized.data(), targetW_, targetH_, 0,
                             static_cast<stbir_pixel_layout>(targetC_));
@@ -100,21 +115,39 @@ bool ImagePreprocessor::preprocessInto(const std::vector<uint8_t>& imageBytes,
                                        std::vector<float>& batchOutput,
                                        size_t offset)
 {
+    const int elemCount = targetC_ * targetH_ * targetW_;
+    if (elemCount <= 0)
+    {
+        LOG_ERROR << "ImagePreprocessor::preprocessInto: invalid input shape (c="
+                  << targetC_ << " h=" << targetH_ << " w=" << targetW_ << ")";
+        return false;
+    }
+    const size_t elemCountZ = static_cast<size_t>(elemCount);
+    if (offset > batchOutput.size() || elemCountZ > batchOutput.size() - offset)
+    {
+        LOG_ERROR << "ImagePreprocessor::preprocessInto: output buffer too small"
+                  << " (size=" << batchOutput.size() << " offset=" << offset
+                  << " elemCount=" << elemCountZ << ")";
+        return false;
+    }
+
     // Same decode+resize+normalize but writes directly into batchOutput[offset..]
     int w, h, channels;
-    unsigned char* data = stbi_load_from_memory(
-        imageBytes.data(), static_cast<int>(imageBytes.size()),
-        &w, &h, &channels, targetC_);
+    unsigned char* data;
+    {
+        std::lock_guard<std::mutex> lock(gStbMutex);
+        data = stbi_load_from_memory(
+            imageBytes.data(), static_cast<int>(imageBytes.size()),
+            &w, &h, &channels, targetC_);
+    }
     if (!data)
     {
         LOG_ERROR << "ImagePreprocessor: failed to decode image";
         return false;
     }
 
-    const int elemCount = targetC_ * targetH_ * targetW_;
-
     thread_local static std::vector<uint8_t> resized;
-    resized.resize(targetH_ * targetW_ * targetC_);
+    resized.resize(elemCount);
     stbir_resize_uint8_srgb(data, w, h, 0,
                             resized.data(), targetW_, targetH_, 0,
                             static_cast<stbir_pixel_layout>(targetC_));

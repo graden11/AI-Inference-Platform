@@ -141,6 +141,9 @@ void HttpRequest::swap(HttpRequest &that)
     std::swap(version_, that.version_);
     std::swap(headers_, that.headers_);
     std::swap(receiveTime_, that.receiveTime_);
+    std::swap(content_, that.content_);
+    std::swap(contentLength_, that.contentLength_);
+    std::swap(bodyTooLarge_, that.bodyTooLarge_);
 }
 
 } // namespace http

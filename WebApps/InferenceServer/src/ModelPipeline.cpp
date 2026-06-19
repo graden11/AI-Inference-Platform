@@ -191,6 +191,17 @@ std::vector<std::string> ModelPipeline::predictBatch(
     }
 
     int perSampleElems = config_.input.elemCount();
+    if (perSampleElems <= 0)
+    {
+        LOG_ERROR << "predictBatch: invalid input shape c=" << config_.input.channels
+                  << " h=" << config_.input.preferred_height
+                  << " w=" << config_.input.preferred_width;
+        std::vector<std::string> errorResults(images.size());
+        for (auto& r : errorResults)
+            r = R"({"status":"error","message":"invalid model input shape"})";
+        return errorResults;
+    }
+
     thread_local std::vector<float> batchInput;
 
     std::vector<std::string> results;

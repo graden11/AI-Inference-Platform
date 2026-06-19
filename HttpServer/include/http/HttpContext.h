@@ -38,6 +38,7 @@ public:
         state_ = kExpectRequestLine;
         HttpRequest dummyData;
         request_.swap(dummyData);
+        perfTrace_.reset();
     }
 
     const HttpRequest& request() const
