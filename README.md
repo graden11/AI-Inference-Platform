@@ -508,7 +508,6 @@ cmake .. -DENABLE_TENSORRT=OFF -DENABLE_ASAN=ON && make -j$(nproc)
 | 文档 | 内容 |
 |------|------|
 | [CLAUDE.md](CLAUDE.md) | 构建命令、架构细节、AI 助手使用指南 |
-| [DEVELOPMENT.md](DEVELOPMENT.md) | 项目发展方向与定位 |
 | [AGENTS.md](AGENTS.md) | AI 助手规则 |
 
 ---
