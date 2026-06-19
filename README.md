@@ -460,15 +460,20 @@ curl http://localhost/system/hardware  # 查看硬件配置
 
 ## 性能
 
-硬件：NVIDIA RTX 5060 (8 GB), 16 核 CPU, Ubuntu 22.04
+硬件：NVIDIA RTX 5060 (8 GB), 16 核 CPU, WSL2 + Docker
 
-| 模型 | 延迟 (avg) | P99 | QPS |
-|------|-----------|-----|-----|
-| TensorRT INT8 | 13.8 ms | 15.2 ms | 142 |
-| TensorRT FP16 | 16.3 ms | 20.0 ms | 152 |
-| ONNX CPU | 76.3 ms | 83.6 ms | 44 |
+**squeezenet1.1-7 TensorRT FP16 批处理压测（配置 A：preferred=[4,8,16,64], delay=20ms）：**
 
-> 使用 `bench_adaptive.py` 进行稳定版/性能版自动压测和对比。
+| 并发 | QPS | P50 | P95 | P99 | Avg Batch | GPU |
+|------|-----|-----|-----|-----|-----------|-----|
+| 1 | 12.0 | 73.5ms | 122.7ms | 132.9ms | 1.0 | 1.6ms |
+| 4 | 411.0 | 10.8ms | 14.9ms | 17.0ms | 4.0 | 1.7ms |
+| 8 | 631.7 | 12.0ms | 21.7ms | 26.4ms | 4.0 | 2.6ms |
+| 16 | 770.7 | 19.7ms | 32.2ms | 38.3ms | 4.1 | 3.2ms |
+| 64 | 905.0 | 69.9ms | 88.1ms | 96.6ms | 8.1 | 4.4ms |
+| **128** | **1025.7** | 124.1ms | 146.7ms | 155.3ms | 15.8 | 5.9ms |
+
+> 测试脚本：`scripts/bench_fixed.py`，压测报告：[results/pressure_test_report.md](results/pressure_test_report.md)
 
 ---
 
